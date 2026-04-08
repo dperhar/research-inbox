@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+src-tauri/gen/schemas
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Strategic / internal docs
+RI-DEV.md
+RESEARCH-SYNTHESIS.md
+CLAUDE.md
+
+# AI tooling config
+.claude/
+sail/
+sail.config.json
+docs/
+
+# Logs
+*.log
+/tmp/
