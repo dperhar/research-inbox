@@ -1,6 +1,6 @@
 # Research Inbox
 
-Desktop-first research capture tool for product people. Clip anything from any app into a searchable feed, then package it as a Context Pack – structured context you can hand to AI tools (Claude, Gemini, Cursor, Windsurf), stakeholders, or anyone who needs the full picture instead of another Loom or 40-slide PDF.
+Desktop-first context capture tool for product people. Clip anything from any app into a searchable feed, then package it as a Context Pack – structured context you can hand to AI tools (Claude, Gemini, Cursor, Windsurf), stakeholders, or anyone who needs the full picture instead of another Loom or 40-slide PDF.
 
 ## What it does
 
