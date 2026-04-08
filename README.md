@@ -1,12 +1,12 @@
 # Research Inbox
 
-Desktop-first research capture tool for product managers. Clip anything from any app into a searchable feed, then package it as a Context Pack for AI tools (Claude, ChatGPT, Perplexity).
+Desktop-first research capture tool for product people. Clip anything from any app into a searchable feed, then package it as a Context Pack – structured context you can hand to AI tools (Claude, Gemini, Cursor, Windsurf), stakeholders, or anyone who needs the full picture instead of another Loom or 40-slide PDF.
 
 ## What it does
 
 1. **Capture** – select text in any app, press `Shift+Cmd+S`. Text is saved with source app, timestamp, and URL
 2. **Search** – full-text search across all captures via SQLite FTS5
-3. **Context Packs** – export structured context (TL;DR, sources, constraints) ready for any AI tool
+3. **Context Packs** – export structured context (TL;DR, sources, constraints) ready for AI tools, stakeholders, or anyone who asks "why did we decide this?"
 
 Screenshots and OCR supported – if no text is selected, it captures the screen and runs on-device text recognition.
 

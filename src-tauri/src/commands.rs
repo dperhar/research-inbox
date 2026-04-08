@@ -120,15 +120,18 @@ pub fn capture_screenshot(
 
     // OCR the image using our compiled Swift helper
     let ocr_binary = get_ocr_binary_path();
-    let ocr_output = Command::new(&ocr_binary)
-        .arg(&img_path_str)
-        .output()
-        .map_err(|e| format!("OCR failed: {}. OCR binary: {}", e, ocr_binary))?;
-
-    let ocr_text = if ocr_output.status.success() {
-        String::from_utf8_lossy(&ocr_output.stdout).trim().to_string()
-    } else {
+    let ocr_text = if ocr_binary.is_empty() {
         String::new()
+    } else {
+        let ocr_output = Command::new(&ocr_binary)
+            .arg(&img_path_str)
+            .output()
+            .map_err(|e| format!("OCR failed: {}. OCR binary: {}", e, ocr_binary))?;
+        if ocr_output.status.success() {
+            String::from_utf8_lossy(&ocr_output.stdout).trim().to_string()
+        } else {
+            String::new()
+        }
     };
 
     // Build content: OCR text + reference to image
@@ -206,8 +209,9 @@ fn get_ocr_binary_path() -> String {
         return dev_path.to_string_lossy().to_string();
     }
 
-    "ocr".to_string()
+    String::new()
 }
+
 
 #[tauri::command]
 pub fn list_items(
@@ -263,12 +267,15 @@ pub fn search_items(
     // Parse special filters
     let mut fts_parts: Vec<String> = Vec::new();
     let mut extra_where: Vec<String> = Vec::new();
+    let mut extra_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     for part in query.split_whitespace() {
         if let Some(tag) = part.strip_prefix('#') {
-            extra_where.push(format!("i.tags LIKE '%\"{}\"'", tag.replace('\'', "''").to_lowercase()));
+            extra_where.push("i.tags LIKE ?".to_string());
+            extra_params.push(Box::new(format!("%\"{}\"", tag.to_lowercase())));
         } else if let Some(source) = part.strip_prefix("from:") {
-            extra_where.push(format!("LOWER(i.source_app) = LOWER('{}')", source.replace('\'', "''")));
+            extra_where.push("LOWER(i.source_app) = LOWER(?)".to_string());
+            extra_params.push(Box::new(source.to_string()));
         } else if part == "today" {
             extra_where.push("i.created_at >= date('now', 'start of day')".to_string());
         } else if part == "this-week" {
@@ -279,31 +286,40 @@ pub fn search_items(
     }
 
     let fts_query = fts_parts.join(" ");
+
+    // Build parameterized query: FTS param (if any), then extra filter params, then limit
+    let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 1u32;
+
     let mut sql = String::from(
         "SELECT i.id, i.content, i.content_type, i.source_app, i.source_url, i.source_title, i.tags, i.char_count, i.is_archived, i.created_at, i.updated_at FROM items i"
     );
 
     if !fts_query.is_empty() {
-        sql.push_str(" JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ?1");
+        sql.push_str(&format!(" JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ?{}", param_idx));
+        all_params.push(Box::new(fts_query));
+        param_idx += 1;
     }
 
     sql.push_str(" WHERE i.is_archived = 0");
     for clause in &extra_where {
-        sql.push_str(&format!(" AND {}", clause));
+        let parameterized = clause.replacen('?', &format!("?{}", param_idx), 1);
+        sql.push_str(&format!(" AND {}", parameterized));
+        if clause.contains('?') {
+            param_idx += 1;
+        }
     }
-    sql.push_str(" ORDER BY i.created_at DESC LIMIT ?");
-    let limit_idx = if fts_query.is_empty() { 1 } else { 2 };
-    sql.push_str(&limit_idx.to_string());
+    for p in extra_params {
+        all_params.push(p);
+    }
 
+    sql.push_str(&format!(" ORDER BY i.created_at DESC LIMIT ?{}", param_idx));
+    all_params.push(Box::new(limit));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let items: Vec<CaptureItem> = if fts_query.is_empty() {
-        let rows = stmt.query_map(params![limit], row_to_item).map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect()
-    } else {
-        let rows = stmt.query_map(params![fts_query, limit], row_to_item).map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
-    Ok(items)
+    let rows = stmt.query_map(param_refs.as_slice(), row_to_item).map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 #[tauri::command]
@@ -572,9 +588,14 @@ pub fn refocus_app(app_name: String) {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+        // Sanitize: only allow alphanumeric, spaces, hyphens, dots (valid macOS app names)
+        let safe_name: String = app_name.chars()
+            .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '.')
+            .collect();
+        if safe_name.is_empty() { return; }
         let script = format!(
             r#"tell application "{}" to activate"#,
-            app_name.replace('"', r#"\""#)
+            safe_name
         );
         let _ = Command::new("osascript").arg("-e").arg(&script).spawn();
     }

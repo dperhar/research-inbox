@@ -11,11 +11,18 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 fn dbg(msg: &str) {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let path = format!("{}/.research-inbox/debug.log", home);
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(&path)
+    {
         let _ = writeln!(f, "{}", msg);
         let _ = f.flush();
     }
@@ -125,7 +132,6 @@ pub fn run() {
 /// 5. Show overlay at top-center
 /// 6. Trigger screenshot mode
 fn do_capture_flow(app: &AppHandle) {
-    use std::process::Command;
     dbg("do_capture_flow");
 
     // 1. Detect foreground app NOW
