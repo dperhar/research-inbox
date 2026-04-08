@@ -6,7 +6,7 @@ Desktop-first research capture tool for product people. Clip anything from any a
 
 1. **Capture** – select text in any app, press `Shift+Cmd+S`. Text is saved with source app, timestamp, and URL
 2. **Search** – full-text search across all captures via SQLite FTS5
-3. **Context Packs** – export structured context (TL;DR, sources, constraints) ready for AI tools, stakeholders, or anyone who asks "why did we decide this?"
+3. **Context Packs** – export structured context (TL;DR, sources, constraints) ready for AI tools, stakeholders, or anyone who asks "why?"
 
 Screenshots and OCR supported – if no text is selected, it captures the screen and runs on-device text recognition.
 
