@@ -133,7 +133,16 @@ export default function ItemCard({ item }: ItemCardProps) {
         {item.tags.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {item.tags.map((tag) => (
-              <span key={tag} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${TAG_COLORS[colorIndex(tag)]}`}>
+              <span
+                key={tag}
+                style={{
+                  background: TAG_COLORS[colorIndex(tag) % TAG_COLORS.length].bg,
+                  color: TAG_COLORS[colorIndex(tag) % TAG_COLORS.length].text,
+                  borderRadius: "var(--radius-tag)",
+                  padding: "1px 6px",
+                  fontSize: "var(--text-metadata)",
+                }}
+              >
                 #{tag}
               </span>
             ))}

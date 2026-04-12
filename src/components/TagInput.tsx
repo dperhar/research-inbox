@@ -63,7 +63,14 @@ export default function TagInput({ value, onChange }: TagInputProps) {
         {value.map((tag) => (
           <span
             key={tag}
-            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${TAG_COLORS[colorIndex(tag)]}`}
+            className="inline-flex items-center gap-0.5 font-medium"
+            style={{
+              background: TAG_COLORS[colorIndex(tag) % TAG_COLORS.length].bg,
+              color: TAG_COLORS[colorIndex(tag) % TAG_COLORS.length].text,
+              borderRadius: "var(--radius-tag)",
+              padding: "1px 6px",
+              fontSize: "var(--text-metadata)",
+            }}
           >
             #{tag}
             <button onClick={() => removeTag(tag)} className="ml-0.5 hover:opacity-70">&times;</button>
@@ -88,7 +95,15 @@ export default function TagInput({ value, onChange }: TagInputProps) {
               onMouseDown={(e) => { e.preventDefault(); addTag(s.name); }}
               className="w-full text-left px-2 py-1 text-xs hover:bg-[var(--bg-secondary)] flex items-center gap-1"
             >
-              <span className={`px-1 rounded ${TAG_COLORS[s.color_index]}`}>#{s.name}</span>
+              <span
+                style={{
+                  background: TAG_COLORS[s.color_index % TAG_COLORS.length].bg,
+                  color: TAG_COLORS[s.color_index % TAG_COLORS.length].text,
+                  borderRadius: "var(--radius-tag)",
+                  padding: "1px 6px",
+                  fontSize: "var(--text-metadata)",
+                }}
+              >#{s.name}</span>
             </button>
           ))}
         </div>

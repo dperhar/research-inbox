@@ -54,12 +54,12 @@ export interface AppInfo {
 export type View = "inbox" | "packs" | "settings" | "pack-editor";
 
 export const TAG_COLORS = [
-  "bg-blue-100 text-blue-700",
-  "bg-green-100 text-green-700",
-  "bg-purple-100 text-purple-700",
-  "bg-orange-100 text-orange-700",
-  "bg-pink-100 text-pink-700",
-  "bg-teal-100 text-teal-700",
-  "bg-yellow-100 text-yellow-700",
-  "bg-red-100 text-red-700",
+  { bg: "var(--tag-blue-bg)", text: "var(--tag-blue-text)" },
+  { bg: "var(--tag-emerald-bg)", text: "var(--tag-emerald-text)" },
+  { bg: "var(--tag-violet-bg)", text: "var(--tag-violet-text)" },
+  { bg: "var(--tag-amber-bg)", text: "var(--tag-amber-text)" },
+  { bg: "var(--tag-rose-bg)", text: "var(--tag-rose-text)" },
+  { bg: "var(--tag-cyan-bg)", text: "var(--tag-cyan-text)" },
+  { bg: "var(--tag-orange-bg)", text: "var(--tag-orange-text)" },
+  { bg: "var(--tag-pink-bg)", text: "var(--tag-pink-text)" },
 ] as const;
