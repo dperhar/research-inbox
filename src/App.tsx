@@ -17,6 +17,17 @@ export default function App() {
   const { view, loadItems, loadSettings, loadTags, showToast, settings } = useStore();
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
+  // Apply theme to document root
+  useEffect(() => {
+    api.getSettings()
+      .then((s) => {
+        document.documentElement.setAttribute("data-theme", s.theme ?? "dark");
+      })
+      .catch(() => {
+        document.documentElement.setAttribute("data-theme", "dark");
+      });
+  }, []);
+
   // Check if onboarding was completed
   useEffect(() => {
     const done = localStorage.getItem("ri-onboarded");
