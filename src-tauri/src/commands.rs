@@ -653,6 +653,7 @@ pub fn trigger_screenshot_capture(app_handle: tauri::AppHandle) -> Result<(), St
 pub async fn enrich_item(
     app: tauri::AppHandle,
     db: tauri::State<'_, Database>,
+    sidecar: tauri::State<'_, std::sync::Arc<crate::ai::sidecar::SidecarManager>>,
     id: String,
 ) -> Result<serde_json::Value, String> {
     use crate::ai::pipeline;
@@ -668,8 +669,11 @@ pub async fn enrich_item(
 
     drop(conn); // Release lock before processing
 
-    // Enrich
-    let enrichment = pipeline::enrich_content(&content);
+    // Try LLM first; fall back to heuristic silently on any error
+    let enrichment = match pipeline::enrich_with_llm(&sidecar, &content) {
+        Ok(result) => result,
+        Err(_) => pipeline::enrich_content(&content),
+    };
     let enrichment_json = serde_json::to_string(&enrichment).unwrap_or_else(|_| "{}".into());
 
     // Compute embedding
@@ -1273,7 +1277,7 @@ mod tests {
 #[tauri::command]
 pub fn check_model_status() -> Result<serde_json::Value, String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let model_path = format!("{}/.research-inbox/models/gemma-4-2b-q4_k_m.gguf", home);
+    let model_path = format!("{}/.research-inbox/models/gemma-4-E2B-it-Q8_0.gguf", home);
     let exists = std::path::Path::new(&model_path).exists();
     Ok(serde_json::json!({
         "downloaded": exists,
@@ -1304,7 +1308,7 @@ pub async fn download_model(app: tauri::AppHandle) -> Result<String, String> {
     let model_dir = format!("{}/.research-inbox/models", home);
     std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
 
-    let model_path = format!("{}/gemma-4-2b-q4_k_m.gguf", model_dir);
+    let model_path = format!("{}/gemma-4-E2B-it-Q8_0.gguf", model_dir);
 
     // Already downloaded?
     if std::path::Path::new(&model_path).exists() {

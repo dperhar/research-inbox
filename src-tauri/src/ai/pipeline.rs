@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use super::sidecar::SidecarManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrichmentResult {
@@ -66,6 +67,34 @@ pub fn enrich_content(content: &str) -> EnrichmentResult {
         content_class: content_class.to_string(),
         entities,
         summary,
+    }
+}
+
+/// Try to enrich content via the local LLM. Returns error if model unavailable
+/// or LLM output can't be parsed – caller should fall back to enrich_content().
+pub fn enrich_with_llm(sidecar: &SidecarManager, content: &str) -> Result<EnrichmentResult, String> {
+    let prompt = format!(
+        "Analyze this text and return ONLY a JSON object, no other text:\n\
+        {{\"auto_tags\": [\"tag1\", \"tag2\"], \"content_class\": \"quote|data|decision|question|reference\", \"entities\": [\"entity1\"], \"summary\": \"one line summary\"}}\n\n\
+        Text: {}\n\nJSON:",
+        &content[..content.len().min(1500)]
+    );
+
+    let response = sidecar.complete(&prompt, 200, 0.1)?;
+
+    let json_str = extract_json(&response);
+    let result: EnrichmentResult = serde_json::from_str(&json_str)
+        .map_err(|e| format!("JSON parse error: {} from: {}", e, &json_str[..json_str.len().min(200)]))?;
+
+    Ok(result)
+}
+
+/// Extract the first `{...}` block from an LLM response string.
+pub fn extract_json(text: &str) -> String {
+    if let (Some(start), Some(end)) = (text.find('{'), text.rfind('}')) {
+        text[start..=end].to_string()
+    } else {
+        "{}".to_string()
     }
 }
 

@@ -136,6 +136,80 @@ impl SidecarManager {
         // from Child.stdout once the llama.cpp binary is wired.
         Err("request: binary not yet wired – placeholder only".to_string())
     }
+
+    /// Run inference synchronously: spawn llama-cli with -p prompt, capture stdout.
+    /// The binary is called fresh each time; macOS mmap keeps the model warm
+    /// after the first load (~150ms cold, ~40ms subsequent).
+    pub fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
+        if !self.model_path.exists() {
+            return Err("Model not found".to_string());
+        }
+
+        self.ttl.reset();
+
+        let binary = self.find_binary()?;
+        log(&format!("complete: binary={}", binary));
+
+        // Point DYLD_LIBRARY_PATH at the same dir as the binary so the
+        // bundled dylibs are found at runtime.
+        let binary_dir = std::path::Path::new(&binary)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_string_lossy()
+            .to_string();
+
+        let output = std::process::Command::new(&binary)
+            .arg("-m").arg(&self.model_path)
+            .arg("--no-display-prompt")
+            .arg("-p").arg(prompt)
+            .arg("-n").arg(max_tokens.to_string())
+            .arg("--temp").arg(temperature.to_string())
+            .arg("--log-disable")
+            .env("DYLD_LIBRARY_PATH", &binary_dir)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("Failed to run llama-cli: {}", e))?;
+
+        if !output.status.success() {
+            let msg = format!("llama-cli exited with: {}", output.status);
+            log(&msg);
+            return Err(msg);
+        }
+
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        log(&format!("complete: got {} chars", result.len()));
+        Ok(result)
+    }
+
+    /// Locate the llama-cli binary. Checks bundled app path first, then dev
+    /// path relative to CARGO_MANIFEST_DIR.
+    fn find_binary(&self) -> Result<String, String> {
+        // Bundled app: <Contents>/MacOS/../Resources/binaries/llama-cli-aarch64-apple-darwin
+        let exe = std::env::current_exe().unwrap_or_default();
+        let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
+        let bundle_path = exe_dir
+            .parent()
+            .unwrap_or(exe_dir)
+            .join("Resources")
+            .join("binaries")
+            .join("llama-cli-aarch64-apple-darwin");
+        if bundle_path.exists() {
+            log(&format!("find_binary: bundle path {:?}", bundle_path));
+            return Ok(bundle_path.to_string_lossy().to_string());
+        }
+
+        // Dev mode: src-tauri/binaries/llama-cli-aarch64-apple-darwin
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join("llama-cli-aarch64-apple-darwin");
+        if dev_path.exists() {
+            log(&format!("find_binary: dev path {:?}", dev_path));
+            return Ok(dev_path.to_string_lossy().to_string());
+        }
+
+        log("find_binary: not found in bundle or dev paths");
+        Err("llama-cli binary not found".to_string())
+    }
 }
 
 #[cfg(test)]

@@ -46,6 +46,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg"],
+    "externalBin": ["binaries/llama-cli"],
     "resources": ["scripts/ocr", "scripts/get_selected_text", "scripts/simulate_copy", "scripts/clipboard_read"],
     "icon": [
       "icons/32x32.png",

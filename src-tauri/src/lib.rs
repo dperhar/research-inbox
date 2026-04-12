@@ -100,7 +100,7 @@ pub fn run() {
             let model_path = std::path::PathBuf::from(&home)
                 .join(".research-inbox")
                 .join("models")
-                .join("gemma-4-2b-q4_k_m.gguf");
+                .join("gemma-4-E2B-it-Q8_0.gguf");
             let sidecar = Arc::new(ai::sidecar::SidecarManager::new(model_path));
             app.manage(sidecar.clone());
 
