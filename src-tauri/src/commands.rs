@@ -721,6 +721,56 @@ pub async fn enrich_item(
     Ok(serde_json::json!({ "ok": true }))
 }
 
+// ── Semantic Search ──
+
+#[tauri::command]
+pub fn semantic_search(
+    db: tauri::State<'_, Database>,
+    query: String,
+    limit: u32,
+) -> Result<Vec<CaptureItem>, String> {
+    use crate::ai::{pipeline, vec};
+
+    // Compute query embedding
+    let query_embedding = pipeline::compute_mock_embedding(&query);
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // Load all embeddings from vec_items
+    let mut stmt = conn.prepare(
+        "SELECT item_id, embedding FROM vec_items"
+    ).map_err(|e| e.to_string())?;
+
+    let candidates: Vec<(String, Vec<f32>)> = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let emb_json: String = row.get(1)?;
+        let emb: Vec<f32> = serde_json::from_str(&emb_json).unwrap_or_default();
+        Ok((id, emb))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .filter(|(_, emb)| emb.len() == 384)
+    .collect();
+
+    // Find nearest
+    let nearest = vec::find_nearest(&query_embedding, &candidates, limit as usize);
+
+    // Load full items for the nearest IDs
+    let mut items = Vec::new();
+    for (item_id, _score) in &nearest {
+        if let Ok(item) = conn.query_row(
+            "SELECT id, content, content_type, source_app, source_url, source_title,
+                    tags, char_count, is_archived, created_at, updated_at, enrichment
+             FROM items WHERE id = ?1",
+            [item_id],
+            row_to_item,
+        ) {
+            items.push(item);
+        }
+    }
+
+    Ok(items)
+}
+
 // ── Helpers ──
 
 fn tag_color_index(tag: &str) -> i64 {

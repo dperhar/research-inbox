@@ -153,6 +153,7 @@ pub fn run() {
             commands::check_hardware,
             commands::download_model,
             commands::enrich_item,
+            commands::semantic_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

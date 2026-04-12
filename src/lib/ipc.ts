@@ -60,4 +60,8 @@ export const api = {
   // AI Enrichment
   enrichItem: (id: string) =>
     invoke<any>("enrich_item", { id }),
+
+  // Semantic Search
+  semanticSearch: (query: string, limit: number = 10) =>
+    invoke<CaptureItem[]>("semantic_search", { query, limit }),
 };

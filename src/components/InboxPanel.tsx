@@ -3,21 +3,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../lib/store";
 import { t } from "../lib/i18n";
-import SearchBar from "./SearchBar";
+import AskBar from "./AskBar";
 import ItemCard from "./ItemCard";
+import BottomNav from "./BottomNav";
 
 export default function InboxPanel() {
-  const { items, selectedIds, setView, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchQuery } = useStore();
+  const { items, selectedIds, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast } = useStore();
 
   useEffect(() => {
     loadItems(showArchived);
   }, [showArchived]);
-
-  const todayCount = items.filter((i) => {
-    const d = new Date(i.created_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey && e.key === "a") {
@@ -75,48 +70,22 @@ export default function InboxPanel() {
 
       {/* Header */}
       <div className="px-3 pb-2 space-y-2 border-b border-[var(--border-default)] bg-[var(--well-wall)]">
-        <div className="flex items-center gap-2">
-          <div className="flex-1">
-            <SearchBar />
-          </div>
-          <button
-            onClick={() => {
-              if (selectedIds.size === 0) return;
-              const { setEditingPack } = useStore.getState();
-              setEditingPack({
-                id: "",
-                title: "",
-                description: "",
-                constraints: "",
-                questions: "",
-                item_ids: Array.from(selectedIds),
-                export_format: "markdown",
-                created_at: "",
-                updated_at: "",
-              });
-            }}
-            disabled={selectedIds.size === 0}
-            className="px-2.5 py-1.5 bg-[var(--accent)] text-white text-xs font-medium rounded-md hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-            title={selectedIds.size === 0 ? t("select_items_hint") : ""}
-          >
-            {t("new_pack")}
-          </button>
-        </div>
+        <AskBar
+          onSearch={(q) => {
+            if (q) searchItems(q);
+            else loadItems(showArchived);
+          }}
+          onIntent={async (_intent) => {
+            showToast("Pack generation coming soon...");
+          }}
+          onChat={() => {}}
+          onAsk={async (_question) => {
+            showToast("Ask mode coming soon...");
+          }}
+        />
 
         {/* Filter row */}
         <div className="flex items-center gap-2 text-[11px]">
-          <button
-            onClick={() => setView("inbox")}
-            className="px-2 py-0.5 rounded font-medium bg-[var(--accent)] text-white"
-          >
-            {t("inbox")}
-          </button>
-          <button
-            onClick={() => setView("packs")}
-            className="px-2 py-0.5 rounded text-[var(--text-2)] hover:bg-[var(--well-floor)]"
-          >
-            {t("packs")}
-          </button>
           <div className="flex-1" />
           <label className="flex items-center gap-1 cursor-pointer">
             <input
@@ -162,17 +131,7 @@ export default function InboxPanel() {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] flex items-center justify-between text-[11px] text-[var(--text-2)]">
-        <button onClick={() => setView("settings")} className="hover:text-[var(--text-1)] transition-colors flex items-center gap-1">
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          {t("settings")}
-        </button>
-        <span>{t("items_today", { count: todayCount })}</span>
-      </div>
+      <BottomNav />
     </div>
   );
 }
