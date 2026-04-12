@@ -1297,3 +1297,55 @@ pub async fn download_model(app: tauri::AppHandle) -> Result<String, String> {
     // The actual HTTP download will be added when Gemma 4 GGUF URL is available.
     Err("Model download not yet available. Place model manually at: ".to_string() + &model_path)
 }
+
+#[tauri::command]
+pub fn generate_pack(
+    db: tauri::State<'_, Database>,
+    intent: String,
+) -> Result<serde_json::Value, String> {
+    let pack = crate::ai::pack_agent::generate_pack_from_intent(&db, &intent)?;
+    serde_json::to_value(&pack).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn chat_pack_agent(
+    db: tauri::State<'_, Database>,
+    pack_id: String,
+    instruction: String,
+) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (title, description, item_ids_str, agent_log_str): (String, Option<String>, String, Option<String>) = conn.query_row(
+        "SELECT title, description, item_ids, agent_log FROM packs WHERE id = ?1",
+        [&pack_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).map_err(|e| e.to_string())?;
+    let item_ids: Vec<String> = serde_json::from_str(&item_ids_str).unwrap_or_default();
+    drop(conn);
+
+    let result = crate::ai::pack_agent::chat_modify_pack(
+        &db, &title, description.as_deref().unwrap_or(""), &item_ids, &instruction,
+    )?;
+
+    // Update pack + append to agent_log
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut log: Vec<serde_json::Value> = agent_log_str
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    log.push(serde_json::json!({"ts": &now, "role": "user", "content": &instruction}));
+    log.push(serde_json::json!({"ts": &now, "role": "ai", "content": result["diff_summary"]}));
+    let log_json = serde_json::to_string(&log).unwrap_or_else(|_| "[]".into());
+
+    let new_item_ids = result["item_ids"].as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
+        .unwrap_or(item_ids);
+    let new_ids_json = serde_json::to_string(&new_item_ids).unwrap_or_else(|_| "[]".into());
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE packs SET item_ids = ?1, agent_log = ?2, updated_at = ?3 WHERE id = ?4",
+        rusqlite::params![new_ids_json, log_json, now, pack_id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(result)
+}

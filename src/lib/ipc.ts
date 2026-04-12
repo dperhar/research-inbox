@@ -64,4 +64,11 @@ export const api = {
   // Semantic Search
   semanticSearch: (query: string, limit: number = 10) =>
     invoke<CaptureItem[]>("semantic_search", { query, limit }),
+
+  // AI Pack Generation
+  generatePack: (intent: string) =>
+    invoke<any>("generate_pack", { intent }),
+
+  chatPackAgent: (packId: string, instruction: string) =>
+    invoke<any>("chat_pack_agent", { packId, instruction }),
 };

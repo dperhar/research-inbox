@@ -154,6 +154,8 @@ pub fn run() {
             commands::download_model,
             commands::enrich_item,
             commands::semantic_search,
+            commands::generate_pack,
+            commands::chat_pack_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

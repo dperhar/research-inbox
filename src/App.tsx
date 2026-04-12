@@ -8,6 +8,7 @@ import { setLanguage } from "./lib/i18n";
 import Toast from "./components/Toast";
 import InboxPanel from "./components/InboxPanel";
 import PackEditor from "./components/PackEditor";
+import PackView from "./components/PackView";
 import Settings from "./components/Settings";
 import PacksList from "./components/PacksList";
 import Onboarding from "./components/Onboarding";
@@ -154,6 +155,7 @@ export default function App() {
       {view === "inbox" && <InboxPanel />}
       {view === "packs" && <PacksList />}
       {view === "pack-editor" && <PackEditor />}
+      {view === "pack-view" && <PackView />}
       {view === "settings" && <Settings />}
     </div>
   );

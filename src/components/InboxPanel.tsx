@@ -2,13 +2,14 @@ import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../lib/store";
+import { api } from "../lib/ipc";
 import { t } from "../lib/i18n";
 import AskBar from "./AskBar";
 import ItemCard from "./ItemCard";
 import BottomNav from "./BottomNav";
 
 export default function InboxPanel() {
-  const { items, selectedIds, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast } = useStore();
+  const { items, selectedIds, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast, setEditingPack } = useStore();
 
   useEffect(() => {
     loadItems(showArchived);
@@ -75,8 +76,22 @@ export default function InboxPanel() {
             if (q) searchItems(q);
             else loadItems(showArchived);
           }}
-          onIntent={async (_intent) => {
-            showToast("Pack generation coming soon...");
+          onIntent={async (intent) => {
+            showToast("Generating pack...");
+            try {
+              const result = await api.generatePack(intent);
+              const pack = await api.createPack(
+                result.title,
+                result.summary,
+                null,
+                null,
+                result.item_ids,
+                "markdown",
+              );
+              setEditingPack(pack);
+            } catch (e: any) {
+              showToast("Pack generation failed: " + (e?.toString() || "unknown error"));
+            }
           }}
           onChat={() => {}}
           onAsk={async (_question) => {

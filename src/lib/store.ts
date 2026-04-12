@@ -125,7 +125,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ packs });
   },
 
-  setEditingPack: (pack) => set({ editingPack: pack, view: pack ? "pack-editor" : "inbox" }),
+  setEditingPack: (pack) => set({ editingPack: pack, view: pack ? "pack-view" : "inbox" }),
 
   deletePack: async (id) => {
     await api.deletePack(id);
