@@ -771,6 +771,33 @@ pub fn semantic_search(
     Ok(items)
 }
 
+// ── Clusters ──
+
+#[tauri::command]
+pub fn get_clusters(db: tauri::State<'_, Database>) -> Result<Vec<crate::models::Cluster>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, title, item_ids, centroid, created_at, updated_at
+         FROM clusters ORDER BY updated_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let clusters = stmt.query_map([], |row| {
+        let item_ids_str: String = row.get(2)?;
+        Ok(crate::models::Cluster {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            item_ids: serde_json::from_str(&item_ids_str).unwrap_or_default(),
+            centroid: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(clusters)
+}
+
 // ── Helpers ──
 
 fn tag_color_index(tag: &str) -> i64 {

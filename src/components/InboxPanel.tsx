@@ -7,9 +7,36 @@ import { t } from "../lib/i18n";
 import AskBar from "./AskBar";
 import ItemCard from "./ItemCard";
 import BottomNav from "./BottomNav";
+import TopicsView from "./TopicsView";
+import type { CaptureItem } from "../types";
+
+const groupByDay = (items: CaptureItem[]) => {
+  const groups: { label: string; items: CaptureItem[] }[] = [];
+  let currentLabel = "";
+
+  for (const item of items) {
+    const date = new Date(item.created_at);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+
+    let label: string;
+    if (date.toDateString() === today.toDateString()) label = "Today";
+    else if (date.toDateString() === yesterday.toDateString()) label = "Yesterday";
+    else label = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    if (label !== currentLabel) {
+      groups.push({ label, items: [item] });
+      currentLabel = label;
+    } else {
+      groups[groups.length - 1].items.push(item);
+    }
+  }
+  return groups;
+};
 
 export default function InboxPanel() {
-  const { items, selectedIds, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast, setEditingPack } = useStore();
+  const { view, items, selectedIds, showArchived, setShowArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast, setEditingPack } = useStore();
 
   useEffect(() => {
     loadItems(showArchived);
@@ -124,27 +151,46 @@ export default function InboxPanel() {
         )}
       </div>
 
-      {/* Item list */}
-      <div className="flex-1 overflow-y-auto bg-[var(--well-floor)]">
-        {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            {searchQuery ? (
-              <p className="text-sm text-[var(--text-2)]">
-                {t("no_results", { query: searchQuery })}
-              </p>
-            ) : (
-              <>
-                <div className="text-3xl mb-3">📋</div>
+      {/* Content area – swaps between Stream and Topics */}
+      {view === "topics" ? (
+        <TopicsView />
+      ) : (
+        <div className="flex-1 overflow-y-auto bg-[var(--well-floor)]">
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+              {searchQuery ? (
                 <p className="text-sm text-[var(--text-2)]">
-                  {t("no_items", { hotkey: "⌥⌘C" })}
+                  {t("no_results", { query: searchQuery })}
                 </p>
-              </>
-            )}
-          </div>
-        ) : (
-          items.map((item) => <ItemCard key={item.id} item={item} />)
-        )}
-      </div>
+              ) : (
+                <>
+                  <div className="text-3xl mb-3">📋</div>
+                  <p className="text-sm text-[var(--text-2)]">
+                    {t("no_items", { hotkey: "⌥⌘C" })}
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
+            groupByDay(items).map((group) => (
+              <div key={group.label}>
+                <div
+                  className="px-3 py-1 sticky top-0"
+                  style={{
+                    fontSize: "var(--text-metadata, 11px)",
+                    color: "var(--text-3, var(--text-2))",
+                    fontWeight: 600,
+                    background: "var(--well-floor)",
+                  }}
+                >
+                  {group.label}
+                </div>
+                {group.items.map((item) => <ItemCard key={item.id} item={item} />)}
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       <BottomNav />
     </div>

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureItem, Tag, ContextPack, AppSettings, AppInfo, ExportFormat } from "../types";
+import type { CaptureItem, Tag, ContextPack, AppSettings, AppInfo, ExportFormat, Cluster } from "../types";
 
 export const api = {
   // Items
@@ -71,4 +71,8 @@ export const api = {
 
   chatPackAgent: (packId: string, instruction: string) =>
     invoke<any>("chat_pack_agent", { packId, instruction }),
+
+  // Clusters
+  getClusters: () =>
+    invoke<Cluster[]>("get_clusters"),
 };

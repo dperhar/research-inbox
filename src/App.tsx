@@ -152,7 +152,7 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-[var(--well-void)] text-[var(--text-1)]">
       <Toast />
-      {view === "inbox" && <InboxPanel />}
+      {(view === "inbox" || view === "topics") && <InboxPanel />}
       {view === "packs" && <PacksList />}
       {view === "pack-editor" && <PackEditor />}
       {view === "pack-view" && <PackView />}

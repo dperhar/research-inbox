@@ -156,6 +156,7 @@ pub fn run() {
             commands::semantic_search,
             commands::generate_pack,
             commands::chat_pack_agent,
+            commands::get_clusters,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
