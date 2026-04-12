@@ -48,4 +48,12 @@ export const api = {
   // System
   getForegroundApp: () =>
     invoke<AppInfo>("get_foreground_app_cmd"),
+
+  // Model / Hardware
+  checkModelStatus: () =>
+    invoke<{ downloaded: boolean; path: string }>("check_model_status"),
+  checkHardware: () =>
+    invoke<{ ram_gb: number; meets_minimum: boolean }>("check_hardware"),
+  downloadModel: () =>
+    invoke<string>("download_model"),
 };

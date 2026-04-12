@@ -12,6 +12,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use std::io::Write;
+use std::sync::Arc;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
@@ -94,6 +95,34 @@ pub fn run() {
             // CGEventTapCreate with listenOnly causes macOS to add us to the Input Monitoring list.
             request_input_monitoring();
 
+            // ── Sidecar setup ──
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let model_path = std::path::PathBuf::from(&home)
+                .join(".research-inbox")
+                .join("models")
+                .join("gemma-4-2b-q4_k_m.gguf");
+            let sidecar = Arc::new(ai::sidecar::SidecarManager::new(model_path));
+            app.manage(sidecar.clone());
+
+            // Watchdog: check every 30s, kill sidecar if TTL expired while Ready
+            let sidecar_watchdog = sidecar.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    if sidecar_watchdog.state() == ai::sidecar::SidecarState::Ready
+                        && sidecar_watchdog.ttl_expired()
+                    {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+                        let path = format!("{}/.research-inbox/debug.log", home);
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path) {
+                            let _ = std::io::Write::write_all(&mut f, b"[watchdog] TTL expired, killing sidecar\n");
+                        }
+                        sidecar_watchdog.kill();
+                    }
+                }
+            });
+
             dbg("SETUP complete");
             Ok(())
         })
@@ -120,6 +149,9 @@ pub fn run() {
             commands::refocus_app,
             commands::trigger_text_capture,
             commands::trigger_screenshot_capture,
+            commands::check_model_status,
+            commands::check_hardware,
+            commands::download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

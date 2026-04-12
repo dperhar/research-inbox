@@ -1116,3 +1116,60 @@ mod tests {
         assert_eq!(ids, vec!["id4", "id3", "id2", "id1", "id0"], "Items should be newest first");
     }
 }
+
+// ── Model / Hardware ──
+
+#[tauri::command]
+pub fn check_model_status() -> Result<serde_json::Value, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let model_path = format!("{}/.research-inbox/models/gemma-4-2b-q4_k_m.gguf", home);
+    let exists = std::path::Path::new(&model_path).exists();
+    Ok(serde_json::json!({
+        "downloaded": exists,
+        "path": model_path,
+    }))
+}
+
+#[tauri::command]
+pub fn check_hardware() -> Result<serde_json::Value, String> {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let ram_bytes: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let ram_gb = ram_bytes / (1024 * 1024 * 1024);
+    Ok(serde_json::json!({
+        "ram_gb": ram_gb,
+        "meets_minimum": ram_gb >= 8,
+    }))
+}
+
+#[tauri::command]
+pub async fn download_model(app: tauri::AppHandle) -> Result<String, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let model_dir = format!("{}/.research-inbox/models", home);
+    std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+
+    let model_path = format!("{}/gemma-4-2b-q4_k_m.gguf", model_dir);
+
+    // Already downloaded?
+    if std::path::Path::new(&model_path).exists() {
+        return Ok(model_path);
+    }
+
+    // For alpha: emit a placeholder progress event and return error.
+    // Real download will be wired when we have the actual model URL.
+    let _ = app.emit("model-download-progress", serde_json::json!({
+        "downloaded": 0,
+        "total": 0,
+        "percent": 0,
+        "status": "not_available",
+    }));
+
+    // Don't add reqwest dependency yet – just return the path placeholder.
+    // The actual HTTP download will be added when Gemma 4 GGUF URL is available.
+    Err("Model download not yet available. Place model manually at: ".to_string() + &model_path)
+}
