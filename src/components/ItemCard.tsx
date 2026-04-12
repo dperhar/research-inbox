@@ -47,7 +47,7 @@ export default function ItemCard({ item }: ItemCardProps) {
 
   return (
     <div
-      className={`relative group border-b border-[var(--border)] px-3 py-2.5 hover:bg-[var(--bg-secondary)] transition-colors cursor-pointer ${isSelected ? "bg-blue-50 dark:bg-blue-900/20" : ""}`}
+      className={`relative group border-b border-[var(--border-subtle)] px-3 py-2.5 bg-[var(--surface-card)] hover:bg-[var(--surface-card-hover)] transition-colors cursor-pointer ${isSelected ? "bg-[var(--accent-muted)]" : ""}`}
       onClick={() => setExpanded(isExpanded ? null : item.id)}
       onContextMenu={(e) => { e.preventDefault(); setShowContext(!showContext); }}
     >
@@ -74,17 +74,17 @@ export default function ItemCard({ item }: ItemCardProps) {
             {item.source_app}
           </span>
 
-          <span className="text-[var(--text-secondary)]">{time}</span>
+          <span className="text-[var(--text-2)]">{time}</span>
 
-          <span className="text-[var(--text-secondary)] opacity-60">{item.char_count.toLocaleString()} ch</span>
+          <span className="text-[var(--text-3)]">{item.char_count.toLocaleString()} ch</span>
 
           {item.source_title && !isImage && (
-            <span className="text-[var(--text-secondary)] opacity-50 truncate max-w-[140px]">{item.source_title}</span>
+            <span className="text-[var(--text-3)] truncate max-w-[140px]">{item.source_title}</span>
           )}
         </div>
 
         {/* Content preview with inline images */}
-        <div className="mt-1 text-[13px] text-[var(--text)] selectable leading-relaxed">
+        <div className="mt-1 text-[13px] text-[var(--text-1)] selectable leading-relaxed">
           {(() => {
             // Extract image paths from content — matches [Image: /path] and [Screenshot: /path]
             const imgRegex = /\[(?:Image|Screenshot): ([^\]]+)\]/g;
@@ -113,14 +113,14 @@ export default function ItemCard({ item }: ItemCardProps) {
                         key={i}
                         src={`asset://localhost/${imgPath}`}
                         alt=""
-                        className={`rounded border border-[var(--border)] object-cover ${
+                        className={`rounded border border-[var(--border-subtle)] object-cover ${
                           isExpanded ? "max-w-[200px] max-h-[150px]" : "w-10 h-10"
                         }`}
                         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                       />
                     ))}
                     {!isExpanded && images.length > 3 && (
-                      <span className="text-[10px] text-[var(--text-secondary)] self-center">+{images.length - 3}</span>
+                      <span className="text-[10px] text-[var(--text-2)] self-center">+{images.length - 3}</span>
                     )}
                   </div>
                 )}
@@ -151,11 +151,11 @@ export default function ItemCard({ item }: ItemCardProps) {
 
         {/* Expanded: tag editor + actions */}
         {isExpanded && (
-          <div className="mt-2 pt-2 border-t border-[var(--border)]" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-2 pt-2 border-t border-[var(--border-default)]" onClick={(e) => e.stopPropagation()}>
             <TagInput value={item.tags} onChange={(tags) => updateItemTags(item.id, tags)} />
             <div className="flex gap-3 mt-2">
               <button onClick={handleCopy} className="text-xs text-[var(--accent)] hover:underline font-medium">{t("copy")}</button>
-              <button onClick={handleArchive} className="text-xs text-[var(--text-secondary)] hover:underline">{t("archive")}</button>
+              <button onClick={handleArchive} className="text-xs text-[var(--text-2)] hover:underline">{t("archive")}</button>
               <button onClick={() => { if (confirm(t("delete_confirm"))) deleteItem(item.id); }} className="text-xs text-red-500 hover:underline">{t("delete")}</button>
             </div>
             {item.source_url && (
@@ -170,14 +170,14 @@ export default function ItemCard({ item }: ItemCardProps) {
       {/* Context menu */}
       {showContext && (
         <div
-          className="absolute right-2 top-2 bg-[var(--bg)] border border-[var(--border)] rounded-lg shadow-xl z-20 py-1 min-w-[140px]"
+          className="absolute right-2 top-2 bg-[var(--surface-card)] border border-[var(--border-default)] rounded-lg shadow-xl z-20 py-1 min-w-[140px]"
           onClick={(e) => e.stopPropagation()}
         >
-          <button onClick={() => { handleCopy(); setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg-secondary)] transition-colors">{t("copy")}</button>
-          <button onClick={() => { setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg-secondary)] transition-colors">{t("add_to_pack")}</button>
-          <div className="border-t border-[var(--border)] my-1" />
-          <button onClick={() => { handleArchive(); setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--bg-secondary)] transition-colors">{t("archive")}</button>
-          <button onClick={() => { if (confirm(t("delete_confirm"))) { deleteItem(item.id); } setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-secondary)] transition-colors">{t("delete")}</button>
+          <button onClick={() => { handleCopy(); setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-card-hover)] transition-colors">{t("copy")}</button>
+          <button onClick={() => { setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-card-hover)] transition-colors">{t("add_to_pack")}</button>
+          <div className="border-t border-[var(--border-default)] my-1" />
+          <button onClick={() => { handleArchive(); setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-card-hover)] transition-colors">{t("archive")}</button>
+          <button onClick={() => { if (confirm(t("delete_confirm"))) { deleteItem(item.id); } setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs text-[var(--signal-error)] hover:bg-[var(--surface-card-hover)] transition-colors">{t("delete")}</button>
         </div>
       )}
     </div>

@@ -32,8 +32,8 @@ export default function Settings() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[var(--border)] flex items-center gap-2">
-        <button onClick={() => setView("inbox")} className="text-[var(--text-secondary)] hover:text-[var(--text)]">
+      <div className="px-3 py-2 border-b border-[var(--border-default)] bg-[var(--well-wall)] flex items-center gap-2">
+        <button onClick={() => setView("inbox")} className="text-[var(--text-2)] hover:text-[var(--text-1)]">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
@@ -47,7 +47,7 @@ export default function Settings() {
           <input
             value={local.capture_hotkey}
             onChange={(e) => update("capture_hotkey", e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none focus:border-[var(--accent)]"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none focus:border-[var(--accent)]"
           />
         </SettingRow>
 
@@ -55,7 +55,7 @@ export default function Settings() {
           <input
             value={local.panel_hotkey}
             onChange={(e) => update("panel_hotkey", e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none focus:border-[var(--accent)]"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none focus:border-[var(--accent)]"
           />
         </SettingRow>
 
@@ -67,7 +67,7 @@ export default function Settings() {
               onChange={(e) => update("quick_tag_on_capture", e.target.checked)}
               className="accent-[var(--accent)]"
             />
-            <span className="text-xs text-[var(--text-secondary)]">{local.quick_tag_on_capture ? "On" : "Off"}</span>
+            <span className="text-xs text-[var(--text-2)]">{local.quick_tag_on_capture ? "On" : "Off"}</span>
           </label>
         </SettingRow>
 
@@ -75,7 +75,7 @@ export default function Settings() {
           <select
             value={local.default_export_format}
             onChange={(e) => update("default_export_format", e.target.value as ExportFormat)}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none"
           >
             <option value="markdown">Markdown</option>
             <option value="claude">Claude</option>
@@ -91,7 +91,7 @@ export default function Settings() {
             onChange={(e) => update("max_capture_size_kb", parseInt(e.target.value) || 50)}
             min={10}
             max={500}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none focus:border-[var(--accent)]"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none focus:border-[var(--accent)]"
           />
         </SettingRow>
 
@@ -103,7 +103,7 @@ export default function Settings() {
               onChange={(e) => update("launch_at_login", e.target.checked)}
               className="accent-[var(--accent)]"
             />
-            <span className="text-xs text-[var(--text-secondary)]">{local.launch_at_login ? "On" : "Off"}</span>
+            <span className="text-xs text-[var(--text-2)]">{local.launch_at_login ? "On" : "Off"}</span>
           </label>
         </SettingRow>
 
@@ -111,7 +111,7 @@ export default function Settings() {
           <select
             value={local.theme}
             onChange={(e) => update("theme", e.target.value as "light" | "dark" | "system")}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none"
           >
             <option value="system">{t("system")}</option>
             <option value="light">{t("light")}</option>
@@ -123,7 +123,7 @@ export default function Settings() {
           <select
             value={local.language}
             onChange={(e) => update("language", e.target.value as "en" | "ru")}
-            className="w-full px-2 py-1 text-xs bg-[var(--bg-secondary)] border border-[var(--border)] rounded outline-none"
+            className="w-full px-2 py-1 text-xs bg-[var(--surface-input)] border border-[var(--border-default)] rounded outline-none"
           >
             <option value="en">English</option>
             <option value="ru">Русский</option>
@@ -132,11 +132,11 @@ export default function Settings() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border)] flex gap-2">
+      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] flex gap-2">
         <button onClick={handleSave} className="flex-1 px-2 py-1.5 bg-[var(--accent)] text-white text-xs font-medium rounded-md hover:bg-[var(--accent-hover)] transition-colors">
           {t("save")}
         </button>
-        <button onClick={() => setView("inbox")} className="px-2 py-1.5 bg-[var(--bg-secondary)] text-[var(--text)] text-xs font-medium rounded-md border border-[var(--border)] hover:bg-[var(--border)] transition-colors">
+        <button onClick={() => setView("inbox")} className="px-2 py-1.5 bg-[var(--surface-input)] text-[var(--text-1)] text-xs font-medium rounded-md border border-[var(--border-default)] hover:bg-[var(--border-default)] transition-colors">
           {t("cancel")}
         </button>
       </div>
@@ -147,7 +147,7 @@ export default function Settings() {
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] text-[var(--text-secondary)] mb-1 font-medium">{label}</div>
+      <div className="text-[11px] text-[var(--text-2)] mb-1 font-medium">{label}</div>
       {children}
     </div>
   );

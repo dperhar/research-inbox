@@ -20,10 +20,10 @@ export default function PacksList() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[var(--border)] flex items-center gap-2">
+      <div className="px-3 py-2 border-b border-[var(--border-default)] bg-[var(--well-wall)] flex items-center gap-2">
         <button
           onClick={() => setView("inbox")}
-          className="px-2 py-0.5 rounded text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          className="px-2 py-0.5 rounded text-[11px] text-[var(--text-2)] hover:bg-[var(--well-floor)]"
         >
           {t("inbox")}
         </button>
@@ -39,18 +39,18 @@ export default function PacksList() {
         {packs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
             <div className="text-3xl mb-3">📦</div>
-            <p className="text-sm text-[var(--text-secondary)]">{t("select_items_hint")}</p>
+            <p className="text-sm text-[var(--text-2)]">{t("select_items_hint")}</p>
           </div>
         ) : (
           packs.map((pack) => (
-            <div key={pack.id} className="px-3 py-2.5 border-b border-[var(--border)] hover:bg-[var(--bg-secondary)] transition-colors">
+            <div key={pack.id} className="px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-card)] hover:bg-[var(--surface-card-hover)] transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{pack.title}</div>
                   {pack.description && (
-                    <div className="text-[11px] text-[var(--text-secondary)] truncate mt-0.5">{pack.description}</div>
+                    <div className="text-[11px] text-[var(--text-2)] truncate mt-0.5">{pack.description}</div>
                   )}
-                  <div className="text-[10px] text-[var(--text-secondary)] mt-1">
+                  <div className="text-[10px] text-[var(--text-2)] mt-1">
                     {pack.item_ids.length} items · {pack.export_format} · {new Date(pack.updated_at).toLocaleDateString()}
                   </div>
                 </div>
@@ -63,13 +63,13 @@ export default function PacksList() {
                   </button>
                   <button
                     onClick={() => setEditingPack(pack)}
-                    className="px-1.5 py-0.5 text-[10px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded hover:bg-[var(--border)]"
+                    className="px-1.5 py-0.5 text-[10px] bg-[var(--surface-input)] border border-[var(--border-default)] rounded hover:bg-[var(--border-default)]"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => { if (confirm(t("delete_confirm"))) deletePack(pack.id); }}
-                    className="px-1.5 py-0.5 text-[10px] text-red-500 bg-[var(--bg-secondary)] border border-[var(--border)] rounded hover:bg-red-50"
+                    className="px-1.5 py-0.5 text-[10px] text-[var(--signal-error)] bg-[var(--surface-input)] border border-[var(--border-default)] rounded hover:bg-[var(--surface-card-hover)]"
                   >
                     &times;
                   </button>
@@ -81,7 +81,7 @@ export default function PacksList() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border)] text-[11px] text-[var(--text-secondary)]">
+      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] text-[11px] text-[var(--text-2)]">
         {packs.length} packs
       </div>
     </div>

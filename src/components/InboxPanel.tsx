@@ -31,10 +31,10 @@ export default function InboxPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full" onKeyDown={handleKeyDown} tabIndex={0}>
+    <div className="flex flex-col h-full well-depth" onKeyDown={handleKeyDown} tabIndex={0}>
       {/* Title bar: drag + capture buttons + close */}
-      <div className="flex items-center px-3 pt-2 pb-1 gap-1" data-tauri-drag-region>
-        <span className="text-xs font-semibold text-[var(--text-secondary)] select-none mr-auto" data-tauri-drag-region>Research Inbox</span>
+      <div className="flex items-center px-3 pt-2 pb-1 gap-1 bg-[var(--well-wall)]" data-tauri-drag-region>
+        <span className="text-xs font-semibold text-[var(--text-2)] select-none mr-auto" data-tauri-drag-region>Research Inbox</span>
 
         {/* Clip Text button */}
         <button
@@ -51,7 +51,7 @@ export default function InboxPanel() {
         {/* Screenshot button */}
         <button
           onClick={() => invoke("trigger_screenshot_capture")}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] transition-colors"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-[var(--text-2)] hover:bg-[var(--well-floor)] transition-colors"
           title="Screenshot (⌥⌘S)"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -64,7 +64,7 @@ export default function InboxPanel() {
         {/* Close */}
         <button
           onClick={() => getCurrentWindow().hide()}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text)] transition-colors ml-1"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--well-floor)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-colors ml-1"
           title="Hide (⌥⌘R)"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
@@ -74,7 +74,7 @@ export default function InboxPanel() {
       </div>
 
       {/* Header */}
-      <div className="px-3 pb-2 space-y-2 border-b border-[var(--border)]">
+      <div className="px-3 pb-2 space-y-2 border-b border-[var(--border-default)] bg-[var(--well-wall)]">
         <div className="flex items-center gap-2">
           <div className="flex-1">
             <SearchBar />
@@ -113,7 +113,7 @@ export default function InboxPanel() {
           </button>
           <button
             onClick={() => setView("packs")}
-            className="px-2 py-0.5 rounded text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+            className="px-2 py-0.5 rounded text-[var(--text-2)] hover:bg-[var(--well-floor)]"
           >
             {t("packs")}
           </button>
@@ -125,7 +125,7 @@ export default function InboxPanel() {
               onChange={(e) => setShowArchived(e.target.checked)}
               className="w-3 h-3 accent-[var(--accent)]"
             />
-            <span className="text-[var(--text-secondary)]">{t("show_archived")}</span>
+            <span className="text-[var(--text-2)]">{t("show_archived")}</span>
           </label>
         </div>
 
@@ -134,24 +134,24 @@ export default function InboxPanel() {
             <span className="text-[var(--accent)] font-medium">
               {t("items_selected", { count: selectedIds.size })}
             </span>
-            <button onClick={clearSelection} className="text-[var(--text-secondary)] hover:underline">{t("cancel")}</button>
-            <button onClick={archiveSelected} className="text-[var(--text-secondary)] hover:underline">{t("archive")}</button>
+            <button onClick={clearSelection} className="text-[var(--text-2)] hover:underline">{t("cancel")}</button>
+            <button onClick={archiveSelected} className="text-[var(--text-2)] hover:underline">{t("archive")}</button>
           </div>
         )}
       </div>
 
       {/* Item list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto bg-[var(--well-floor)]">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
             {searchQuery ? (
-              <p className="text-sm text-[var(--text-secondary)]">
+              <p className="text-sm text-[var(--text-2)]">
                 {t("no_results", { query: searchQuery })}
               </p>
             ) : (
               <>
                 <div className="text-3xl mb-3">📋</div>
-                <p className="text-sm text-[var(--text-secondary)]">
+                <p className="text-sm text-[var(--text-2)]">
                   {t("no_items", { hotkey: "⌥⌘C" })}
                 </p>
               </>
@@ -163,8 +163,8 @@ export default function InboxPanel() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--text-secondary)]">
-        <button onClick={() => setView("settings")} className="hover:text-[var(--text)] transition-colors flex items-center gap-1">
+      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] flex items-center justify-between text-[11px] text-[var(--text-2)]">
+        <button onClick={() => setView("settings")} className="hover:text-[var(--text-1)] transition-colors flex items-center gap-1">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
