@@ -1,3 +1,11 @@
+export interface Enrichment {
+  auto_tags: string[];
+  content_class: "quote" | "data" | "screenshot" | "decision" | "question" | "reference";
+  entities: string[];
+  summary: string;
+  cluster_id?: string;
+}
+
 export interface CaptureItem {
   id: string;
   content: string;
@@ -10,6 +18,7 @@ export interface CaptureItem {
   is_archived: boolean;
   created_at: string;
   updated_at: string;
+  enrichment?: Enrichment | null;
 }
 
 export interface Tag {
@@ -17,6 +26,26 @@ export interface Tag {
   use_count: number;
   last_used_at: string;
   color_index: number;
+}
+
+export interface Cluster {
+  id: string;
+  title: string;
+  item_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PackMeta {
+  audience?: string;
+  tone?: string;
+  purpose?: string;
+}
+
+export interface AgentLogEntry {
+  ts: string;
+  role: "user" | "ai";
+  content: string;
 }
 
 export interface ContextPack {
@@ -29,6 +58,8 @@ export interface ContextPack {
   export_format: ExportFormat;
   created_at: string;
   updated_at: string;
+  meta?: PackMeta;
+  agent_log?: AgentLogEntry[];
 }
 
 export type ExportFormat = "markdown" | "claude" | "chatgpt" | "cursor";
@@ -51,7 +82,7 @@ export interface AppInfo {
   url_from_title?: string;
 }
 
-export type View = "inbox" | "packs" | "settings" | "pack-editor";
+export type View = "inbox" | "packs" | "topics" | "settings" | "pack-view" | "pack-editor";
 
 export const TAG_COLORS = [
   { bg: "var(--tag-blue-bg)", text: "var(--tag-blue-text)" },

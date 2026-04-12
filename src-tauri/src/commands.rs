@@ -23,6 +23,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<CaptureItem> {
         is_archived: is_archived != 0,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        enrichment: row.get(11)?,
     })
 }
 
@@ -48,6 +49,8 @@ fn row_to_pack(row: &rusqlite::Row) -> rusqlite::Result<ContextPack> {
         export_format: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        meta: row.get(9)?,
+        agent_log: row.get(10)?,
     })
 }
 
@@ -88,6 +91,7 @@ pub fn capture_item(
     Ok(CaptureItem {
         id, content, content_type: "text".to_string(), source_app, source_url, source_title,
         tags, char_count, is_archived: false, created_at: now.clone(), updated_at: now,
+        enrichment: None,
     })
 }
 
@@ -168,6 +172,7 @@ pub fn capture_screenshot(
         source_app: app_info.app_name, source_url: Some(img_path_str),
         source_title: Some(app_info.window_title), tags, char_count,
         is_archived: false, created_at: now.clone(), updated_at: now,
+        enrichment: None,
     })
 }
 
@@ -226,7 +231,7 @@ pub fn list_items(
     let archived_val: i32 = if archived { 1 } else { 0 };
 
     let mut sql = String::from(
-        "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at FROM items WHERE is_archived = ?"
+        "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE is_archived = ?"
     );
     let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(archived_val)];
 
@@ -258,7 +263,7 @@ pub fn search_items(
 
     if query.trim().is_empty() {
         let mut stmt = conn.prepare(
-            "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at FROM items WHERE is_archived = 0 ORDER BY created_at DESC LIMIT ?1"
+            "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE is_archived = 0 ORDER BY created_at DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map(params![limit], row_to_item).map_err(|e| e.to_string())?;
         return Ok(rows.filter_map(|r| r.ok()).collect());
@@ -292,7 +297,7 @@ pub fn search_items(
     let mut param_idx = 1u32;
 
     let mut sql = String::from(
-        "SELECT i.id, i.content, i.content_type, i.source_app, i.source_url, i.source_title, i.tags, i.char_count, i.is_archived, i.created_at, i.updated_at FROM items i"
+        "SELECT i.id, i.content, i.content_type, i.source_app, i.source_url, i.source_title, i.tags, i.char_count, i.is_archived, i.created_at, i.updated_at, i.enrichment FROM items i"
     );
 
     if !fts_query.is_empty() {
@@ -358,7 +363,7 @@ pub fn update_item(
     }
 
     let mut stmt = conn.prepare(
-        "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at FROM items WHERE id = ?1"
+        "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
     stmt.query_row(params![id], row_to_item).map_err(|e| e.to_string())
 }
@@ -423,6 +428,7 @@ pub fn create_pack(
     Ok(ContextPack {
         id, title, description, constraints, questions, item_ids, export_format,
         created_at: now.clone(), updated_at: now,
+        meta: None, agent_log: None,
     })
 }
 
@@ -461,7 +467,7 @@ pub fn update_pack(
     }
 
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at FROM packs WHERE id = ?1"
+        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
     stmt.query_row(params![id], row_to_pack).map_err(|e| e.to_string())
 }
@@ -470,7 +476,7 @@ pub fn update_pack(
 pub fn list_packs(db: State<'_, Database>, limit: u32) -> Result<Vec<ContextPack>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at FROM packs ORDER BY updated_at DESC LIMIT ?1"
+        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs ORDER BY updated_at DESC LIMIT ?1"
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map(params![limit], row_to_pack).map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -481,14 +487,14 @@ pub fn export_pack(db: State<'_, Database>, id: String, format: String) -> Resul
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at FROM packs WHERE id = ?1"
+        "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
     let pack = stmt.query_row(params![id], row_to_pack).map_err(|e| e.to_string())?;
 
     let mut items: Vec<CaptureItem> = Vec::new();
     for item_id in &pack.item_ids {
         let mut item_stmt = conn.prepare(
-            "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at FROM items WHERE id = ?1"
+            "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE id = ?1"
         ).map_err(|e| e.to_string())?;
         if let Ok(item) = item_stmt.query_row(params![item_id], row_to_item) {
             items.push(item);
@@ -782,12 +788,14 @@ mod tests {
             constraints: Some("Be concise".into()), questions: Some("What is X?".into()),
             item_ids: vec!["i1".into()], export_format: "markdown".into(),
             created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None, agent_log: None,
         };
         let items = vec![CaptureItem {
             id: "i1".into(), content: "Hello world".into(), content_type: "text".into(),
             source_app: "Chrome".into(), source_url: Some("https://example.com".into()),
             source_title: Some("Example".into()), tags: vec![], char_count: 11,
             is_archived: false, created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            enrichment: None,
         }];
         let out = format_pack(&pack, &items, "markdown");
         assert!(out.contains("# Test Pack"));
@@ -803,6 +811,7 @@ mod tests {
             constraints: None, questions: None,
             item_ids: vec![], export_format: "claude".into(),
             created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None, agent_log: None,
         };
         let out = format_pack(&pack, &[], "claude");
         assert!(out.contains("<context>"));
@@ -907,12 +916,14 @@ mod tests {
             constraints: Some("constraint1".into()), questions: Some("q1".into()),
             item_ids: vec!["i1".into()], export_format: "chatgpt".into(),
             created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None, agent_log: None,
         };
         let items = vec![CaptureItem {
             id: "i1".into(), content: "Test content".into(), content_type: "text".into(),
             source_app: "Slack".into(), source_url: None, source_title: Some("Channel".into()),
             tags: vec![], char_count: 12, is_archived: false,
             created_at: "2026-03-28T14:30:00Z".into(), updated_at: "2026-03-28T14:30:00Z".into(),
+            enrichment: None,
         }];
         let out = format_pack(&pack, &items, "chatgpt");
         assert!(out.contains("# Context Pack: GPT Test"));
@@ -928,6 +939,7 @@ mod tests {
             constraints: None, questions: None,
             item_ids: vec![], export_format: "cursor".into(),
             created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None, agent_log: None,
         };
         let out = format_pack(&pack, &[], "cursor");
         assert!(out.contains("# Project Context: Cursor Test"));
@@ -942,6 +954,7 @@ mod tests {
             constraints: None, questions: None,
             item_ids: vec![], export_format: "markdown".into(),
             created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None, agent_log: None,
         };
         let out = format_pack(&pack, &[], "markdown");
         assert!(out.contains("# Context Pack"), "Empty title should use fallback");

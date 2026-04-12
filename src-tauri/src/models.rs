@@ -13,6 +13,26 @@ pub struct CaptureItem {
     pub is_archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub enrichment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Enrichment {
+    pub auto_tags: Vec<String>,
+    pub content_class: String,
+    pub entities: Vec<String>,
+    pub summary: String,
+    pub cluster_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Cluster {
+    pub id: String,
+    pub title: String,
+    pub item_ids: Vec<String>,
+    pub centroid: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +54,8 @@ pub struct ContextPack {
     pub export_format: String,
     pub created_at: String,
     pub updated_at: String,
+    pub meta: Option<String>,
+    pub agent_log: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
