@@ -47,12 +47,31 @@ export default function ItemCard({ item }: ItemCardProps) {
 
   return (
     <div
-      className={`relative group border-b border-[var(--border-subtle)] px-3 py-2.5 bg-[var(--surface-card)] hover:bg-[var(--surface-card-hover)] transition-colors cursor-pointer ${isSelected ? "bg-[var(--accent-muted)]" : ""}`}
+      className={`relative group cursor-pointer ${isSelected ? "ring-1 ring-[var(--accent)] ring-opacity-30" : ""}`}
       onClick={() => setExpanded(isExpanded ? null : item.id)}
       onContextMenu={(e) => { e.preventDefault(); setShowContext(!showContext); }}
+      style={{
+        background: isSelected ? "var(--accent-muted)" : "var(--surface-card)",
+        boxShadow: "var(--shadow-card)",
+        borderRadius: "var(--radius-card)",
+        border: "1px solid var(--border-subtle)",
+        marginBottom: "6px",
+        transition: "all var(--duration-hover) var(--ease-mechanical)",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.boxShadow = "var(--shadow-card-hover)";
+        (e.currentTarget as HTMLDivElement).style.background = isSelected ? "var(--accent-muted)" : "var(--surface-card-hover)";
+        (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-hover)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.boxShadow = "var(--shadow-card)";
+        (e.currentTarget as HTMLDivElement).style.background = isSelected ? "var(--accent-muted)" : "var(--surface-card)";
+        (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-subtle)";
+      }}
     >
+      <div className="px-3 py-2.5">
       {/* Checkbox */}
-      <div className="absolute left-1 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute left-2 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
         <input
           type="checkbox"
           checked={isSelected}
@@ -166,11 +185,17 @@ export default function ItemCard({ item }: ItemCardProps) {
           </div>
         )}
       </div>
+      </div>
 
       {/* Context menu */}
       {showContext && (
         <div
-          className="absolute right-2 top-2 bg-[var(--surface-card)] border border-[var(--border-default)] rounded-lg shadow-xl z-20 py-1 min-w-[140px]"
+          className="absolute right-2 top-2 border rounded-lg shadow-xl z-20 py-1 min-w-[140px]"
+          style={{
+            background: "var(--surface-elevated)",
+            border: "1px solid var(--border-default)",
+            boxShadow: "var(--shadow-elevated)",
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <button onClick={() => { handleCopy(); setShowContext(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-card-hover)] transition-colors">{t("copy")}</button>

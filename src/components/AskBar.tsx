@@ -13,7 +13,7 @@ interface AskBarProps {
 const MODES: AskBarMode[] = ["search", "intent", "chat", "ask"];
 
 const MODE_PLACEHOLDERS: Record<AskBarMode, string> = {
-  search: "Search items...",
+  search: "Ask or search...",
   intent: "Describe what to collect...",
   chat: "Chat with this pack...",
   ask: "Ask a question...",
@@ -248,7 +248,7 @@ export default function AskBar({ activePack, onSearch, onIntent, onChat, onAsk }
           }}
         />
 
-        {value && (
+        {value ? (
           <button
             type="button"
             onClick={() => {
@@ -264,6 +264,18 @@ export default function AskBar({ activePack, onSearch, onIntent, onChat, onAsk }
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+        ) : (
+          <span
+            className="flex-shrink-0 text-[10px] font-medium px-1 py-0.5 rounded"
+            style={{
+              color: "var(--text-3)",
+              background: "var(--border-subtle)",
+              letterSpacing: "0.02em",
+              opacity: 0.7,
+            }}
+          >
+            ⌘K
+          </span>
         )}
       </div>
 
