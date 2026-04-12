@@ -647,6 +647,80 @@ pub fn trigger_screenshot_capture(app_handle: tauri::AppHandle) -> Result<(), St
     result
 }
 
+// ── AI Enrichment ──
+
+#[tauri::command]
+pub async fn enrich_item(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Database>,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    use crate::ai::pipeline;
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // Read item content
+    let content: String = conn.query_row(
+        "SELECT content FROM items WHERE id = ?1",
+        [&id],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+
+    drop(conn); // Release lock before processing
+
+    // Enrich
+    let enrichment = pipeline::enrich_content(&content);
+    let enrichment_json = serde_json::to_string(&enrichment).unwrap_or_else(|_| "{}".into());
+
+    // Compute embedding
+    let embedding = pipeline::compute_mock_embedding(&content);
+    let embedding_json = serde_json::to_string(&embedding).unwrap_or_else(|_| "[]".into());
+
+    // Write to DB
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Update enrichment
+    conn.execute(
+        "UPDATE items SET enrichment = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![enrichment_json, now, id],
+    ).map_err(|e| e.to_string())?;
+
+    // Merge auto_tags into existing tags
+    let existing_tags_str: String = conn.query_row(
+        "SELECT tags FROM items WHERE id = ?1", [&id], |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    let mut tags: Vec<String> = serde_json::from_str(&existing_tags_str).unwrap_or_default();
+    for tag in &enrichment.auto_tags {
+        if !tags.contains(tag) {
+            tags.push(tag.clone());
+        }
+    }
+    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
+    conn.execute(
+        "UPDATE items SET tags = ?1 WHERE id = ?2",
+        rusqlite::params![tags_json, id],
+    ).map_err(|e| e.to_string())?;
+
+    // Store embedding in vec_items
+    conn.execute(
+        "INSERT OR REPLACE INTO vec_items (item_id, embedding) VALUES (?1, ?2)",
+        rusqlite::params![id, embedding_json],
+    ).map_err(|e| e.to_string())?;
+
+    drop(conn);
+
+    // Emit event for frontend
+    let _ = app.emit("item-enriched", serde_json::json!({
+        "id": id,
+        "enrichment": enrichment,
+        "tags": tags,
+    }));
+
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 // ── Helpers ──
 
 fn tag_color_index(tag: &str) -> i64 {

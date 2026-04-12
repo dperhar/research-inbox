@@ -56,4 +56,8 @@ export const api = {
     invoke<{ ram_gb: number; meets_minimum: boolean }>("check_hardware"),
   downloadModel: () =>
     invoke<string>("download_model"),
+
+  // AI Enrichment
+  enrichItem: (id: string) =>
+    invoke<any>("enrich_item", { id }),
 };

@@ -152,6 +152,7 @@ pub fn run() {
             commands::check_model_status,
             commands::check_hardware,
             commands::download_model,
+            commands::enrich_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

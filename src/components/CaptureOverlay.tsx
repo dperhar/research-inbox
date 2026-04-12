@@ -13,6 +13,7 @@ type OverlayState =
 
 export default function CaptureOverlay() {
   const [state, setState] = useState<OverlayState>({ mode: "idle" });
+  const [autoTags, setAutoTags] = useState<string[]>([]);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const sourceAppRef = useRef(""); // remember source app for refocus
 
@@ -27,6 +28,17 @@ export default function CaptureOverlay() {
       }
     }, 4000);
   };
+
+  // Listen for enrichment result and update tags
+  useEffect(() => {
+    const unlisten = listen<{ id: string; enrichment: any; tags: string[] }>(
+      "item-enriched",
+      (event) => {
+        setAutoTags(event.payload.tags.filter((t: string) => t.startsWith('#')));
+      }
+    );
+    return () => { unlisten.then((f) => f()); };
+  }, []);
 
   // Text + image capture event from Rust
   useEffect(() => {
@@ -46,6 +58,7 @@ export default function CaptureOverlay() {
         } catch {}
 
         sourceAppRef.current = appName;
+        setAutoTags([]);
 
         // Build content: text + image references
         let content = selectedText || "";
@@ -69,13 +82,16 @@ export default function CaptureOverlay() {
           return;
         }
 
-        await invoke<CaptureItem>("capture_item", {
+        const item = await invoke<CaptureItem>("capture_item", {
           content,
           sourceApp: appName,
           sourceUrl: null,
           sourceTitle: null,
           tags: [],
         });
+
+        // Fire enrichment in background (don't block UI)
+        invoke("enrich_item", { id: item.id }).catch(() => {});
 
         const hasImages = imagePaths.length > 0;
         const hasText = !!(selectedText && selectedText.trim());
@@ -178,6 +194,33 @@ export default function CaptureOverlay() {
             {state.source} — "{state.preview}..."
           </span>
         </div>
+        {autoTags.length > 0 && (
+          <div className="flex gap-1 ml-auto shrink-0">
+            {autoTags.slice(0, 3).map((tag, i) => (
+              <span
+                key={tag}
+                style={{
+                  background: "var(--accent-muted)",
+                  color: "var(--accent)",
+                  borderRadius: "var(--radius-tag)",
+                  padding: "0 5px",
+                  fontSize: "10px",
+                  animation: `tagFadeIn 200ms ${i * 200}ms var(--ease-settle) both`,
+                }}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {autoTags.length === 0 && state.mode === "success" && (
+          <div className="ml-auto w-16 h-3 rounded shrink-0"
+            style={{
+              background: "var(--accent-muted)",
+              animation: "accentPulse 1.5s var(--ease-mechanical) infinite",
+            }}
+          />
+        )}
         <div className="flex-1" />
         {/* Thin progress bar that shrinks over 4s */}
         <div className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full overflow-hidden">
