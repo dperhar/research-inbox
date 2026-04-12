@@ -17,16 +17,12 @@ export default function App() {
   const { view, loadItems, loadSettings, loadTags, showToast, settings } = useStore();
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
-  // Apply theme to document root
+  // Apply theme to document root (reactive – updates when settings change)
   useEffect(() => {
-    api.getSettings()
-      .then((s) => {
-        document.documentElement.setAttribute("data-theme", s.theme ?? "dark");
-      })
-      .catch(() => {
-        document.documentElement.setAttribute("data-theme", "dark");
-      });
-  }, []);
+    if (settings?.theme) {
+      document.documentElement.setAttribute("data-theme", settings.theme);
+    }
+  }, [settings?.theme]);
 
   // Check if onboarding was completed
   useEffect(() => {
@@ -153,7 +149,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
+    <div className="h-screen flex flex-col bg-[var(--well-void)] text-[var(--text-1)]">
       <Toast />
       {view === "inbox" && <InboxPanel />}
       {view === "packs" && <PacksList />}
