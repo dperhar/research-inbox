@@ -24,3 +24,4 @@ docs/
 # Logs
 *.log
 /tmp/
+src-tauri/icons/icon.iconset/
