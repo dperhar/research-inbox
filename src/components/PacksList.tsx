@@ -20,7 +20,13 @@ export default function PacksList() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[var(--border-default)] bg-[var(--well-wall)] flex items-center gap-2">
+      <div
+        className="px-3 py-2 border-b flex items-center gap-2"
+        style={{
+          background: "rgba(15, 15, 20, 0.72)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         <button
           onClick={() => setView("inbox")}
           className="px-2 py-0.5 rounded text-[11px] text-[var(--text-2)] hover:bg-[var(--well-floor)]"
@@ -35,15 +41,36 @@ export default function PacksList() {
       </div>
 
       {/* Pack list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto px-2 py-2">
         {packs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <div className="text-3xl mb-3">📦</div>
-            <p className="text-sm text-[var(--text-2)]">{t("select_items_hint")}</p>
+          <div className="flex items-center justify-center h-full text-center px-2">
+            <div
+              className="w-full rounded-xl px-4 py-5"
+              style={{
+                background: "var(--surface-card)",
+                border: "1px solid var(--border-subtle)",
+                boxShadow: "var(--shadow-card)",
+              }}
+            >
+              <p className="text-sm font-medium" style={{ color: "var(--text-1)" }}>
+                No context packs yet
+              </p>
+              <p className="mt-1 text-[13px]" style={{ color: "var(--text-2)" }}>
+                Select items and create a pack, or describe what you need in the search bar.
+              </p>
+            </div>
           </div>
         ) : (
-          packs.map((pack) => (
-            <div key={pack.id} className="px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-card)] hover:bg-[var(--surface-card-hover)] transition-colors">
+          <div className="space-y-2">
+            {packs.map((pack) => (
+              <div
+                key={pack.id}
+                className="px-3 py-2.5 rounded-xl border bg-[var(--surface-card)] hover:bg-[var(--surface-card-hover)] transition-colors"
+                style={{
+                  borderColor: "var(--border-subtle)",
+                  boxShadow: "var(--shadow-card)",
+                }}
+              >
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{pack.title}</div>
@@ -75,13 +102,20 @@ export default function PacksList() {
                   </button>
                 </div>
               </div>
-            </div>
-          ))
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] text-[11px] text-[var(--text-2)]">
+      <div
+        className="px-3 py-2 border-t text-[11px] text-[var(--text-2)]"
+        style={{
+          background: "rgba(26, 26, 36, 0.55)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         {packs.length} packs
       </div>
     </div>

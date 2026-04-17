@@ -12,7 +12,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 /// Find the top-k most similar candidates to a query vector.
 /// Returns a Vec of (item_id, similarity) sorted by similarity descending.
-pub fn find_nearest(query: &[f32], candidates: &[(String, Vec<f32>)], k: usize) -> Vec<(String, f32)> {
+pub fn find_nearest(
+    query: &[f32],
+    candidates: &[(String, Vec<f32>)],
+    k: usize,
+) -> Vec<(String, f32)> {
     let mut scored: Vec<(String, f32)> = candidates
         .iter()
         .map(|(id, emb)| (id.clone(), cosine_similarity(query, emb)))

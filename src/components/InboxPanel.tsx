@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStore } from "../lib/store";
 import { api } from "../lib/ipc";
-import { t } from "../lib/i18n";
 import AskBar from "./AskBar";
 import ItemCard from "./ItemCard";
 import BottomNav from "./BottomNav";
@@ -21,8 +20,13 @@ const groupByDay = (items: CaptureItem[]) => {
 
     let label: string;
     if (date.toDateString() === today.toDateString()) label = "Today";
-    else if (date.toDateString() === yesterday.toDateString()) label = "Yesterday";
-    else label = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    else if (date.toDateString() === yesterday.toDateString())
+      label = "Yesterday";
+    else
+      label = date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
 
     if (label !== currentLabel) {
       groups.push({ label, items: [item] });
@@ -31,15 +35,37 @@ const groupByDay = (items: CaptureItem[]) => {
       groups[groups.length - 1].items.push(item);
     }
   }
+
   return groups;
 };
 
 export default function InboxPanel() {
-  const { view, items, selectedIds, showArchived, loadItems, selectAll, clearSelection, archiveSelected, searchItems, searchQuery, showToast, setEditingPack } = useStore();
+  const {
+    view,
+    items,
+    loading,
+    selectedIds,
+    showArchived,
+    loadItems,
+    selectAll,
+    clearSelection,
+    archiveSelected,
+    searchItems,
+    searchQuery,
+    showToast,
+    setEditingPack,
+  } = useStore();
 
   useEffect(() => {
     loadItems(showArchived);
   }, [showArchived]);
+
+  const todayCount = items.filter((item) => {
+    const itemDate = new Date(item.created_at);
+    return itemDate.toDateString() === new Date().toDateString();
+  }).length;
+
+  const sourceCount = new Set(items.map((item) => item.source_app)).size;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey && e.key === "a") {
@@ -52,42 +78,122 @@ export default function InboxPanel() {
     }
   };
 
+  // §4.3 Inbox shell — hero slogan removed. The first viewport answers
+  // "what do I have, how do I get to the right context fast?" via the Ask Bar.
+  const hasCaptures = items.length > 0;
+  const showMetadata = hasCaptures || !!searchQuery;
+  const metadataLine = searchQuery
+    ? `${items.length} result${items.length === 1 ? "" : "s"} · “${searchQuery}”`
+    : `${items.length} capture${items.length === 1 ? "" : "s"} · ${sourceCount} source${
+        sourceCount === 1 ? "" : "s"
+      } · ${todayCount} today`;
+
   return (
     <div
-      className="flex flex-col h-full well-depth"
+      className="flex h-full flex-col"
       onKeyDown={handleKeyDown}
       tabIndex={0}
       style={{ animation: "panelReveal 280ms var(--ease-well-open) both" }}
     >
-      {/* Minimal title bar – just drag region + close */}
+      {/* v2.5 top chrome — compact draggable bar. Quiet, placeable. */}
       <div
-        className="flex items-center px-3 pt-2 pb-0"
+        className="flex items-center px-3.5"
         data-tauri-drag-region
-        style={{ background: "var(--well-wall)" }}
+        style={{
+          position: "relative",
+          zIndex: 2,
+          height: 26,
+          borderBottom: "1px solid var(--border-subtle)",
+          background:
+            "linear-gradient(180deg, rgba(10,10,14,0.72) 0%, rgba(8,8,12,0.48) 100%)",
+          backdropFilter: "blur(14px) saturate(140%)",
+          WebkitBackdropFilter: "blur(14px) saturate(140%)",
+        }}
       >
-        <div className="flex-1" data-tauri-drag-region />
+        <div className="flex flex-1 items-center justify-center" data-tauri-drag-region>
+          <span aria-hidden className="drag-grip" />
+        </div>
         <button
           onClick={() => getCurrentWindow().hide()}
-          className="w-5 h-5 flex items-center justify-center rounded transition-colors"
-          style={{ color: "var(--text-3)", opacity: 0.5 }}
+          className="flex h-5 w-5 items-center justify-center rounded-full transition-all"
+          style={{ color: "var(--text-3)" }}
           title="Hide"
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.5")}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(255,255,255,0.05)";
+            (e.currentTarget as HTMLButtonElement).style.color =
+              "var(--text-1)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "transparent";
+            (e.currentTarget as HTMLButtonElement).style.color =
+              "var(--text-3)";
+          }}
         >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          <svg
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
       </div>
 
-      {/* AskBar – prominent, no clutter */}
       <div
-        className="px-3 pt-2 pb-2"
-        style={{ background: "var(--well-wall)", borderBottom: "1px solid var(--border-subtle)" }}
+        className="px-3.5 pb-2.5 pt-2.5"
+        style={{
+          position: "relative",
+          zIndex: 1,
+          borderBottom: "1px solid var(--border-subtle)",
+          background:
+            "linear-gradient(180deg, rgba(8,8,12,0.74) 0%, rgba(8,8,12,0.5) 100%)",
+        }}
       >
+        {/* One quiet metadata/status line. No hero slogan, no competing pills.
+            Suppressed on first run (no captures, no search) — an empty line of
+            zeros is just visual noise before the user has done anything. */}
+        {showMetadata && (
+          <div
+            className="mb-2 flex items-center justify-between gap-2 px-0.5"
+            style={{ fontSize: 10.5, color: "var(--text-3)" }}
+          >
+            <span
+              className="truncate"
+              style={{
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                fontWeight: 600,
+              }}
+              title={metadataLine}
+            >
+              {metadataLine}
+            </span>
+            {todayCount > 0 && !searchQuery && (
+              <span
+                className="shrink-0"
+                style={{
+                  fontFeatureSettings: "'tnum'",
+                  color: "var(--text-2)",
+                  fontWeight: 600,
+                }}
+              >
+                Today
+              </span>
+            )}
+          </div>
+        )}
+
         <AskBar
-          onSearch={(q) => {
-            if (q) searchItems(q);
+          onSearch={(query) => {
+            if (query) searchItems(query);
             else loadItems(showArchived);
           }}
           onIntent={async (intent) => {
@@ -104,71 +210,237 @@ export default function InboxPanel() {
               );
               setEditingPack(pack);
             } catch (e: any) {
-              showToast("Pack generation failed: " + (e?.toString() || "unknown error"));
+              showToast(
+                "Pack generation failed: " + (e?.toString() || "unknown error"),
+              );
             }
           }}
           onChat={() => {}}
-          onAsk={async (_question) => {
+          onAsk={async () => {
             showToast("Ask mode coming soon...");
           }}
         />
 
-        {/* Selection bar – only shown when items are selected */}
         {selectedIds.size > 0 && (
-          <div className="flex items-center gap-2 mt-1.5 text-[11px]">
-            <span className="text-[var(--accent)] font-medium">
-              {t("items_selected", { count: selectedIds.size })}
-            </span>
-            <button onClick={clearSelection} className="text-[var(--text-2)] hover:underline">{t("cancel")}</button>
-            <button onClick={archiveSelected} className="text-[var(--text-2)] hover:underline">{t("archive")}</button>
+          <div className="surface-card-quiet mt-2.5 flex items-center justify-between gap-3 rounded-[14px] px-3 py-2">
+            <div className="min-w-0">
+              <p
+                style={{
+                  fontSize: 11,
+                  color: "var(--accent-hover)",
+                  fontWeight: 700,
+                }}
+              >
+                {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"}{" "}
+                selected
+              </p>
+              <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>
+                Archive or use them to assemble a pack.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={clearSelection}
+                className="rounded-full px-2.5 py-1"
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-2)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
+              >
+                Clear
+              </button>
+              <button
+                onClick={archiveSelected}
+                className="rounded-full px-2.5 py-1"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--accent-hover)",
+                  background: "var(--accent-muted)",
+                }}
+              >
+                Archive
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Content area – swaps between Stream and Topics */}
       {view === "topics" ? (
         <TopicsView />
       ) : (
         <div
-          className="flex-1 overflow-y-auto"
+          className="flex-1 overflow-y-auto px-3 pb-3"
           style={{
-            background: "var(--well-floor)",
-            backgroundImage: "var(--well-glow)",
+            background:
+              "linear-gradient(180deg, rgba(8,8,12,0.22) 0%, rgba(8,8,12,0.04) 100%), var(--well-glow)",
             backgroundRepeat: "no-repeat",
           }}
         >
-          {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+          {loading ? (
+            <div className="flex h-full items-center justify-center px-4">
+              <div className="surface-card-quiet w-full rounded-[18px] px-5 py-6 text-center">
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-2)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Loading your latest signals...
+                </p>
+              </div>
+            </div>
+          ) : items.length === 0 ? (
+            // §3.6 honest states: "search-miss" and "empty inbox" are NOT the same
+            // moment. An empty inbox is an onboarding prompt ("press ⇧⌘S");
+            // a search-miss is a retrieval result ("your query didn't hit — widen
+            // it, or clear it"). Each gets its own tone and CTA.
+            <div className="flex h-full items-center justify-center px-3">
               {searchQuery ? (
-                <p className="text-sm" style={{ color: "var(--text-2)" }}>
-                  {t("no_results", { query: searchQuery })}
-                </p>
+                <div
+                  className="w-full rounded-[14px] px-4 py-5 text-center"
+                  style={{
+                    background: "rgba(255,255,255,0.015)",
+                    border: "1px dashed var(--border-default)",
+                  }}
+                >
+                  <div
+                    className="mx-auto flex h-9 w-9 items-center justify-center rounded-full"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      color: "var(--text-3)",
+                    }}
+                    aria-hidden
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                      />
+                    </svg>
+                  </div>
+                  <p
+                    className="mt-2.5"
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--text-1)",
+                      fontWeight: 620,
+                    }}
+                  >
+                    No matches for “{searchQuery}”
+                  </p>
+                  <p
+                    className="mt-1"
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-2)",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Widen the query, switch mode, or clear to browse recent captures.
+                  </p>
+                  <button
+                    onClick={() => {
+                      searchItems("");
+                      // Broadcast so AskBar can drop its own local input value —
+                      // otherwise the user sees the query still lingering in the
+                      // input while results show latest captures (confusing state).
+                      window.dispatchEvent(new CustomEvent("ri-clear-search"));
+                    }}
+                    className="mt-2.5 rounded-full px-3 py-1"
+                    style={{
+                      background: "var(--accent-muted)",
+                      color: "var(--accent-hover)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    Clear search
+                  </button>
+                </div>
               ) : (
-                <p style={{ fontSize: "var(--text-secondary-size)", color: "var(--text-3)" }}>
-                  Press ⇧⌘S to capture your first signal.
-                </p>
+                <div className="w-full rounded-[14px] px-4 py-5 text-center surface-card-quiet">
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: "var(--text-1)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    No captures yet
+                  </p>
+                  <p
+                    className="mt-1.5"
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--text-2)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Press ⇧⌘S from any app. Text or screen region — both land here.
+                  </p>
+                </div>
               )}
             </div>
           ) : (
             groupByDay(items).map((group) => (
-              <div key={group.label}>
+              <section key={group.label}>
                 <div
-                  className="px-3 py-1.5 sticky top-0"
+                  className="sticky top-0 z-10 px-1 pb-1.5 pt-3"
                   style={{
-                    fontSize: "var(--text-metadata, 11px)",
-                    color: "var(--text-3, var(--text-2))",
-                    fontWeight: 600,
-                    background: "var(--well-floor)",
-                    letterSpacing: "0.04em",
-                    textTransform: "uppercase",
+                    background:
+                      "linear-gradient(180deg, rgba(5,5,8,0.96) 0%, rgba(5,5,8,0.8) 76%, rgba(5,5,8,0) 100%)",
                   }}
                 >
-                  {group.label}
+                  <div className="flex items-center gap-2">
+                    <span
+                      style={{
+                        fontSize: 10,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                        color: "var(--text-3)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {group.label}
+                    </span>
+                    <span
+                      className="rounded-full px-1.5 py-0.5"
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-2)",
+                        background: "rgba(255,255,255,0.04)",
+                      }}
+                    >
+                      {group.items.length}
+                    </span>
+                  </div>
                 </div>
-                <div className="px-2 pb-1">
-                  {group.items.map((item) => <ItemCard key={item.id} item={item} />)}
+
+                <div className="space-y-2.5 px-1 pb-1">
+                  {group.items.map((item, index) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        animation: "itemStagger 220ms var(--ease-settle) both",
+                        animationDelay: `${Math.min(index, 6) * 22}ms`,
+                      }}
+                    >
+                      <ItemCard item={item} />
+                    </div>
+                  ))}
                 </div>
-              </div>
+              </section>
             ))
           )}
         </div>

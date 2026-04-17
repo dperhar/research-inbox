@@ -37,48 +37,80 @@ export default function TopicsView() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p style={{ fontSize: "var(--text-metadata, 11px)", color: "var(--text-3, var(--text-2))" }}>
-          Loading topics...
-        </p>
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="surface-card-quiet w-full rounded-[18px] px-5 py-6 text-center">
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.5 }}>
+            Grouping related signals...
+          </p>
+        </div>
       </div>
     );
   }
 
   if (clusters.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-        <p
-          style={{
-            fontSize: "var(--text-body, 13px)",
-            color: "var(--text-2)",
-            lineHeight: 1.5,
-          }}
-        >
-          Topics appear when AI groups 3+ related captures.
-        </p>
-        <p
-          style={{
-            fontSize: "var(--text-metadata, 11px)",
-            color: "var(--text-3, var(--text-2))",
-            marginTop: 6,
-          }}
-        >
-          Keep capturing – patterns emerge over time.
-        </p>
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="surface-card-sheen w-full rounded-[18px] px-5 py-6 text-center">
+          <p style={{ fontSize: 14, color: "var(--text-1)", fontWeight: 600 }}>
+            No topic clusters yet.
+          </p>
+          <p style={{ marginTop: 8, fontSize: 13, color: "var(--text-2)", lineHeight: 1.55 }}>
+            Topics appear when AI notices patterns across 3 or more related captures.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ background: "var(--well-floor)" }}>
-      <div className="px-3 py-2 space-y-2">
-        {clusters.map((cluster) => (
-          <ClusterCard
+    <div
+      className="flex-1 overflow-y-auto px-3 pb-3"
+      style={{
+        background:
+          "linear-gradient(180deg, rgba(8,8,12,0.22) 0%, rgba(8,8,12,0.04) 100%), var(--well-glow)",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
+      <div className="px-1 pb-2 pt-4">
+        <div className="flex items-center gap-2">
+          <span
+            style={{
+              fontSize: 10,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "var(--text-3)",
+              fontWeight: 700,
+            }}
+          >
+            Topics
+          </span>
+          <span
+            className="rounded-full px-1.5 py-0.5"
+            style={{
+              fontSize: 10,
+              color: "var(--text-2)",
+              background: "rgba(255,255,255,0.04)",
+            }}
+          >
+            {clusters.length}
+          </span>
+        </div>
+        <p style={{ marginTop: 8, fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+          AI-generated clusters for retrieval when you do not know the exact keywords yet.
+        </p>
+      </div>
+
+      <div className="space-y-2 px-1">
+        {clusters.map((cluster, index) => (
+          <div
             key={cluster.id}
-            cluster={cluster}
-            onGeneratePack={handleGeneratePack}
-          />
+            style={{
+              animation: "itemStagger 220ms var(--ease-settle) both",
+              animationDelay: `${Math.min(index, 6) * 22}ms`,
+            }}
+          >
+            <ClusterCard cluster={cluster} onGeneratePack={handleGeneratePack} />
+          </div>
         ))}
       </div>
     </div>

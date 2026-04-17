@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::sidecar::SidecarManager;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnrichmentResult {
@@ -19,7 +19,12 @@ pub fn enrich_content(content: &str) -> EnrichmentResult {
         "question"
     } else if lower.contains("decided") || lower.contains("agreed") || lower.contains("will do") {
         "decision"
-    } else if lower.contains('%') || lower.contains('$') || lower.contains("revenue") || lower.contains("churn") || lower.contains("mrr") {
+    } else if lower.contains('%')
+        || lower.contains('$')
+        || lower.contains("revenue")
+        || lower.contains("churn")
+        || lower.contains("mrr")
+    {
         "data"
     } else if lower.starts_with('"') || lower.starts_with('\u{201c}') {
         "quote"
@@ -28,7 +33,8 @@ pub fn enrich_content(content: &str) -> EnrichmentResult {
     };
 
     // Extract basic entities (words that start with uppercase, >3 chars, not at sentence start)
-    let entities: Vec<String> = content.split_whitespace()
+    let entities: Vec<String> = content
+        .split_whitespace()
         .filter(|w| w.len() > 3 && w.chars().next().map_or(false, |c| c.is_uppercase()))
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
         .filter(|w| !w.is_empty())
@@ -40,20 +46,31 @@ pub fn enrich_content(content: &str) -> EnrichmentResult {
     // Auto-tags from content keywords
     let mut auto_tags = Vec::new();
     let tag_keywords = [
-        ("churn", "churn"), ("retention", "retention"), ("onboarding", "onboarding"),
-        ("pricing", "pricing"), ("enterprise", "enterprise"), ("revenue", "revenue"),
-        ("bug", "bug"), ("feature", "feature"), ("design", "design"),
-        ("feedback", "feedback"), ("metric", "metrics"), ("customer", "customer"),
+        ("churn", "churn"),
+        ("retention", "retention"),
+        ("onboarding", "onboarding"),
+        ("pricing", "pricing"),
+        ("enterprise", "enterprise"),
+        ("revenue", "revenue"),
+        ("bug", "bug"),
+        ("feature", "feature"),
+        ("design", "design"),
+        ("feedback", "feedback"),
+        ("metric", "metrics"),
+        ("customer", "customer"),
     ];
     for (keyword, tag) in &tag_keywords {
         if lower.contains(keyword) {
             auto_tags.push(format!("#{}", tag));
-            if auto_tags.len() >= 3 { break; }
+            if auto_tags.len() >= 3 {
+                break;
+            }
         }
     }
 
     // 1-line summary (first sentence, truncated)
-    let summary = content.split(&['.', '!', '?', '\n'][..])
+    let summary = content
+        .split(&['.', '!', '?', '\n'][..])
         .next()
         .unwrap_or(content)
         .chars()
@@ -72,7 +89,10 @@ pub fn enrich_content(content: &str) -> EnrichmentResult {
 
 /// Try to enrich content via the local LLM. Returns error if model unavailable
 /// or LLM output can't be parsed – caller should fall back to enrich_content().
-pub fn enrich_with_llm(sidecar: &SidecarManager, content: &str) -> Result<EnrichmentResult, String> {
+pub fn enrich_with_llm(
+    sidecar: &SidecarManager,
+    content: &str,
+) -> Result<EnrichmentResult, String> {
     let prompt = format!(
         "Analyze this text and return ONLY a JSON object, no other text:\n\
         {{\"auto_tags\": [\"tag1\", \"tag2\"], \"content_class\": \"quote|data|decision|question|reference\", \"entities\": [\"entity1\"], \"summary\": \"one line summary\"}}\n\n\
@@ -83,8 +103,13 @@ pub fn enrich_with_llm(sidecar: &SidecarManager, content: &str) -> Result<Enrich
     let response = sidecar.complete(&prompt, 200, 0.1)?;
 
     let json_str = extract_json(&response);
-    let result: EnrichmentResult = serde_json::from_str(&json_str)
-        .map_err(|e| format!("JSON parse error: {} from: {}", e, &json_str[..json_str.len().min(200)]))?;
+    let result: EnrichmentResult = serde_json::from_str(&json_str).map_err(|e| {
+        format!(
+            "JSON parse error: {} from: {}",
+            e,
+            &json_str[..json_str.len().min(200)]
+        )
+    })?;
 
     Ok(result)
 }

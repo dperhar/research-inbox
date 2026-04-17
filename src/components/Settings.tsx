@@ -32,7 +32,13 @@ export default function Settings() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-[var(--border-default)] bg-[var(--well-wall)] flex items-center gap-2">
+      <div
+        className="px-3 py-2 border-b flex items-center gap-2"
+        style={{
+          background: "rgba(15, 15, 20, 0.72)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         <button onClick={() => setView("inbox")} className="text-[var(--text-2)] hover:text-[var(--text-1)]">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -132,7 +138,13 @@ export default function Settings() {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--well-rim)] flex gap-2">
+      <div
+        className="px-3 py-2 border-t flex gap-2"
+        style={{
+          background: "rgba(26, 26, 36, 0.55)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
         <button onClick={handleSave} className="flex-1 px-2 py-1.5 bg-[var(--accent)] text-white text-xs font-medium rounded-md hover:bg-[var(--accent-hover)] transition-colors">
           {t("save")}
         </button>
@@ -146,8 +158,15 @@ export default function Settings() {
 
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="text-[11px] text-[var(--text-2)] mb-1 font-medium">{label}</div>
+    <div
+      className="rounded-xl px-3 py-3"
+      style={{
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <div className="text-[11px] text-[var(--text-2)] mb-2 font-medium">{label}</div>
       {children}
     </div>
   );

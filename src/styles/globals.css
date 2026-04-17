@@ -9,65 +9,299 @@
 
 body {
   font-family: var(--font-sans);
-  font-size: var(--text-primary-size);
-  font-weight: 500;
+  font-size: var(--text-primary);
+  font-weight: 400;
   letter-spacing: 0;
-  background: var(--well-void);
+  /* transparent so native macOS vibrancy shows through */
+  background: transparent;
   color: var(--text-1);
   overflow: hidden;
   -webkit-user-select: none;
   user-select: none;
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 3px; }
+html,
+body,
+#root {
+  height: 100%;
+  background: transparent;
+}
+
+.panel-stage {
+  height: 100%;
+  padding: 4px;
+  /* v2.5: matte-first stage. Accent fog dialled back so the well reads neutral, not lavender. */
+  background:
+    radial-gradient(
+      circle at top center,
+      rgba(129, 140, 248, 0.035) 0%,
+      transparent 34%
+    ),
+    linear-gradient(180deg, rgba(4, 4, 6, 0.98) 0%, rgba(4, 4, 6, 0.94) 100%);
+}
+
+.panel-shell {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border-default);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.025) 0%,
+      rgba(255, 255, 255, 0.008) 100%
+    ),
+    var(--well-void);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    var(--shadow-well);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.panel-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* v2.5: interior highlight is a faint wash, not a glow halo. */
+  background:
+    radial-gradient(
+      circle at top center,
+      rgba(129, 140, 248, 0.055) 0%,
+      transparent 38%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 28%);
+  opacity: 0.78;
+}
+
+.surface-card-sheen {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.035) 0%,
+      rgba(255, 255, 255, 0.015) 100%
+    ),
+    var(--surface-card);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-card);
+}
+
+.surface-card-quiet {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.025) 0%,
+      rgba(255, 255, 255, 0.01) 100%
+    ),
+    var(--well-floor);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+}
+
+.kbd-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
 
 .selectable {
   -webkit-user-select: text;
   user-select: text;
 }
 
+/* v2.5 motion. Instrumental by design — panel reveal stays mechanical,
+ * tag enrichment fades in async, timers shrink linearly. No springiness,
+ * no decorative scaling — nothing that delays the perception of readiness. */
+
 @keyframes panelReveal {
-  from { opacity: 0; transform: scale(1.02) translateY(-4px); }
-  to { opacity: 1; transform: scale(1.0) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes itemStagger {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes newItemSlide {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes tagFadeIn {
-  from { opacity: 0; transform: translateX(-4px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes shrink {
-  from { width: 100%; }
-  to { width: 0%; }
-}
-
-@keyframes accentPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
-  50% { box-shadow: var(--shadow-accent-glow); }
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
 }
 
 .overlay-glass {
-  background: var(--overlay-bg);
+  position: relative;
+  /* v2.5: capture HUD reads as smoked glass / disciplined metal, not neon-glass. */
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.055) 0%,
+      rgba(255, 255, 255, 0.018) 100%
+    ),
+    var(--overlay-bg);
   border: 1px solid var(--overlay-border);
-  box-shadow: var(--overlay-shadow);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    var(--overlay-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.065);
+  backdrop-filter: blur(36px) saturate(160%);
+  -webkit-backdrop-filter: blur(36px) saturate(160%);
+}
+
+.overlay-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* v2.5: subtle corner highlight only, less violet wash. */
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(129, 140, 248, 0.06) 0%,
+      transparent 42%
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 48%);
+  opacity: 0.9;
+}
+
+.overlay-glass[data-state="error"] {
+  /* §4.2 blocked state: unmistakable from success. Warm warning wash + sturdier border. */
+  border-color: rgba(251, 191, 36, 0.32);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(251, 191, 36, 0.12);
+}
+
+.overlay-glass[data-state="error"]::before {
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(251, 191, 36, 0.1) 0%,
+      transparent 46%
+    ),
+    linear-gradient(180deg, rgba(251, 191, 36, 0.03) 0%, transparent 50%);
+}
+
+.overlay-glass[data-state="duplicate"] {
+  /* §3.6 honest states — duplicate isn't a fresh save. Indigo-tinted border
+     carries the "already in inbox" cue beyond the icon+headline alone. */
+  border-color: rgba(129, 140, 248, 0.22);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(129, 140, 248, 0.08);
+}
+
+.overlay-glass[data-state="duplicate"]::before {
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(129, 140, 248, 0.08) 0%,
+      transparent 42%
+    ),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.02) 0%, transparent 48%);
 }
 
 .well-depth {
   box-shadow: var(--shadow-well);
   background-image: var(--well-glow);
   background-repeat: no-repeat;
+}
+
+/* v2.5: drag affordance — visible but quiet. Used by overlay header, panel top chrome. */
+.drag-grip {
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  transition: background var(--duration-hover) var(--ease-mechanical);
+}
+.drag-grip:hover,
+[data-tauri-drag-region]:hover .drag-grip {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+/* Evidence strip — scan-speed card used by ItemCard. Lower mass than the previous sheen card. */
+.evidence-strip {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-card);
+  border-radius: 14px;
+  transition:
+    background var(--duration-hover) var(--ease-mechanical),
+    border-color var(--duration-hover) var(--ease-mechanical);
+}
+.evidence-strip:hover {
+  background: var(--surface-card-hover);
+  border-color: var(--border-hover);
+}
+.evidence-strip[data-selected="true"] {
+  background: linear-gradient(
+      180deg,
+      rgba(99, 102, 241, 0.085) 0%,
+      rgba(99, 102, 241, 0.035) 100%
+    ),
+    var(--surface-card);
+  border-color: rgba(129, 140, 248, 0.28);
 }

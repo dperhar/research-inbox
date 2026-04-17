@@ -1,16 +1,21 @@
 use crate::db::Database;
 use crate::models::*;
-use rusqlite::params;
-use tauri::{Emitter, State};
-use uuid::Uuid;
 use chrono::Utc;
-use std::process::Command;
+use rusqlite::params;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use tauri::{Emitter, Manager, State};
+use tauri_plugin_positioner::{Position as AnchorPosition, WindowExt};
+use uuid::Uuid;
 
 fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<CaptureItem> {
     let tags_str: String = row.get(6)?;
     let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
     let is_archived: i32 = row.get(8)?;
+    let enrichment_str: Option<String> = row.get(11)?;
     Ok(CaptureItem {
         id: row.get(0)?,
         content: row.get(1)?,
@@ -23,7 +28,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<CaptureItem> {
         is_archived: is_archived != 0,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
-        enrichment: row.get(11)?,
+        enrichment: enrichment_str.and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 
@@ -65,7 +70,6 @@ pub fn capture_item(
     source_title: Option<String>,
     tags: Vec<String>,
 ) -> Result<CaptureItem, String> {
-
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -85,21 +89,47 @@ pub fn capture_item(
              VALUES (?1, 1, ?2, ?3)
              ON CONFLICT(name) DO UPDATE SET use_count = use_count + 1, last_used_at = ?2",
             params![tag, now, color_index],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(CaptureItem {
-        id, content, content_type: "text".to_string(), source_app, source_url, source_title,
-        tags, char_count, is_archived: false, created_at: now.clone(), updated_at: now,
+        id,
+        content,
+        content_type: "text".to_string(),
+        source_app,
+        source_url,
+        source_title,
+        tags,
+        char_count,
+        is_archived: false,
+        created_at: now.clone(),
+        updated_at: now,
         enrichment: None,
     })
 }
 
 #[tauri::command]
 pub fn capture_screenshot(
+    app_handle: tauri::AppHandle,
     db: State<'_, Database>,
     tags: Vec<String>,
 ) -> Result<CaptureItem, String> {
+    // §4.2 blocked state — preflight the macOS Screen Recording permission
+    // before invoking screencapture. Without this, a denied permission and
+    // a user-cancelled capture look identical to the overlay, and the HUD
+    // would wrongly collapse to success/interactive instead of the blocked state.
+    if !preflight_screen_capture_access() {
+        let _ = app_handle.emit(
+            "capture-error",
+            serde_json::json!({
+                "kind": "permission",
+                "message": "Research Inbox needs Screen Recording access."
+            }),
+        );
+        return Err("permission_denied".to_string());
+    }
+
     // Get data dir for storing images
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let images_dir = PathBuf::from(&home).join(".research-inbox").join("images");
@@ -116,10 +146,21 @@ pub fn capture_screenshot(
     let status = Command::new("screencapture")
         .args(["-i", &img_path_str])
         .status()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("screencapture spawn failed: {}", e))?;
 
-    if !status.success() || !img_path.exists() {
-        return Err("Screenshot cancelled or failed".to_string());
+    if !img_path.exists() {
+        // User cancelled (Esc) — not an error, not a success. Signal benign cancel.
+        return Err("cancelled".to_string());
+    }
+    if !status.success() {
+        let _ = app_handle.emit(
+            "capture-error",
+            serde_json::json!({
+                "kind": "failed",
+                "message": "screencapture exited non-zero"
+            }),
+        );
+        return Err("Screenshot capture failed".to_string());
     }
 
     // OCR the image using our compiled Swift helper
@@ -132,7 +173,9 @@ pub fn capture_screenshot(
             .output()
             .map_err(|e| format!("OCR failed: {}. OCR binary: {}", e, ocr_binary))?;
         if ocr_output.status.success() {
-            String::from_utf8_lossy(&ocr_output.stdout).trim().to_string()
+            String::from_utf8_lossy(&ocr_output.stdout)
+                .trim()
+                .to_string()
         } else {
             String::new()
         }
@@ -164,23 +207,28 @@ pub fn capture_screenshot(
             "INSERT INTO tags (name, use_count, last_used_at, color_index) VALUES (?1, 1, ?2, ?3)
              ON CONFLICT(name) DO UPDATE SET use_count = use_count + 1, last_used_at = ?2",
             params![tag, now, ci],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(CaptureItem {
-        id, content, content_type: "image".to_string(),
-        source_app: app_info.app_name, source_url: Some(img_path_str),
-        source_title: Some(app_info.window_title), tags, char_count,
-        is_archived: false, created_at: now.clone(), updated_at: now,
+        id,
+        content,
+        content_type: "image".to_string(),
+        source_app: app_info.app_name,
+        source_url: Some(img_path_str),
+        source_title: Some(app_info.window_title),
+        tags,
+        char_count,
+        is_archived: false,
+        created_at: now.clone(),
+        updated_at: now,
         enrichment: None,
     })
 }
 
 #[tauri::command]
-pub fn check_duplicate(
-    db: State<'_, Database>,
-    content: String,
-) -> Result<bool, String> {
+pub fn check_duplicate(db: State<'_, Database>, content: String) -> Result<bool, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     // Check if identical content exists in last 100 items
     let exists: bool = conn.query_row(
@@ -197,7 +245,12 @@ fn get_ocr_binary_path() -> String {
     let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
 
     // macOS .app bundle: Contents/MacOS/../Resources/scripts/ocr
-    let resources = exe_dir.parent().unwrap_or(exe_dir).join("Resources").join("scripts").join("ocr");
+    let resources = exe_dir
+        .parent()
+        .unwrap_or(exe_dir)
+        .join("Resources")
+        .join("scripts")
+        .join("ocr");
     if resources.exists() {
         return resources.to_string_lossy().to_string();
     }
@@ -209,14 +262,15 @@ fn get_ocr_binary_path() -> String {
     }
 
     // Development: cargo manifest dir
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts").join("ocr");
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("ocr");
     if dev_path.exists() {
         return dev_path.to_string_lossy().to_string();
     }
 
     String::new()
 }
-
 
 #[tauri::command]
 pub fn list_items(
@@ -237,7 +291,7 @@ pub fn list_items(
 
     if let Some(ref tag) = tag_filter {
         sql.push_str(" AND tags LIKE ?");
-        params_vec.push(Box::new(format!("%\"{}\"%" , tag)));
+        params_vec.push(Box::new(format!("%\"{}\"%", tag)));
     }
     if let Some(ref source) = source_filter {
         sql.push_str(" AND LOWER(source_app) = LOWER(?)");
@@ -247,9 +301,12 @@ pub fn list_items(
     params_vec.push(Box::new(limit));
     params_vec.push(Box::new(offset));
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(param_refs.as_slice(), row_to_item).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(param_refs.as_slice(), row_to_item)
+        .map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -265,7 +322,9 @@ pub fn search_items(
         let mut stmt = conn.prepare(
             "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE is_archived = 0 ORDER BY created_at DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![limit], row_to_item).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![limit], row_to_item)
+            .map_err(|e| e.to_string())?;
         return Ok(rows.filter_map(|r| r.ok()).collect());
     }
 
@@ -301,7 +360,10 @@ pub fn search_items(
     );
 
     if !fts_query.is_empty() {
-        sql.push_str(&format!(" JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ?{}", param_idx));
+        sql.push_str(&format!(
+            " JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ?{}",
+            param_idx
+        ));
         all_params.push(Box::new(fts_query));
         param_idx += 1;
     }
@@ -321,9 +383,12 @@ pub fn search_items(
     sql.push_str(&format!(" ORDER BY i.created_at DESC LIMIT ?{}", param_idx));
     all_params.push(Box::new(limit));
 
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        all_params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(param_refs.as_slice(), row_to_item).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(param_refs.as_slice(), row_to_item)
+        .map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -342,12 +407,16 @@ pub fn update_item(
         conn.execute(
             "UPDATE items SET content = ?1, char_count = ?2, updated_at = ?3 WHERE id = ?4",
             params![c, c.len() as i64, now, id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref t) = tags {
         let tags_json = serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string());
-        conn.execute("UPDATE items SET tags = ?1, updated_at = ?2 WHERE id = ?3", params![tags_json, now, id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE items SET tags = ?1, updated_at = ?2 WHERE id = ?3",
+            params![tags_json, now, id],
+        )
+        .map_err(|e| e.to_string())?;
         for tag in t {
             let ci = tag_color_index(tag);
             conn.execute(
@@ -358,20 +427,25 @@ pub fn update_item(
         }
     }
     if let Some(archived) = is_archived {
-        conn.execute("UPDATE items SET is_archived = ?1, updated_at = ?2 WHERE id = ?3",
-            params![if archived { 1 } else { 0 }, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE items SET is_archived = ?1, updated_at = ?2 WHERE id = ?3",
+            params![if archived { 1 } else { 0 }, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     let mut stmt = conn.prepare(
         "SELECT id, content, content_type, source_app, source_url, source_title, tags, char_count, is_archived, created_at, updated_at, enrichment FROM items WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], row_to_item).map_err(|e| e.to_string())
+    stmt.query_row(params![id], row_to_item)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_item(db: State<'_, Database>, id: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM items WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM items WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -390,13 +464,17 @@ pub fn list_tags(
         let mut stmt = conn.prepare(
             "SELECT name, use_count, last_used_at, color_index FROM tags WHERE name LIKE ?1 ORDER BY use_count DESC LIMIT ?2"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![search, limit], row_to_tag).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![search, limit], row_to_tag)
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     } else {
         let mut stmt = conn.prepare(
             "SELECT name, use_count, last_used_at, color_index FROM tags ORDER BY use_count DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![limit], row_to_tag).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![limit], row_to_tag)
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
     Ok(items)
@@ -426,9 +504,17 @@ pub fn create_pack(
     ).map_err(|e| e.to_string())?;
 
     Ok(ContextPack {
-        id, title, description, constraints, questions, item_ids, export_format,
-        created_at: now.clone(), updated_at: now,
-        meta: None, agent_log: None,
+        id,
+        title,
+        description,
+        constraints,
+        questions,
+        item_ids,
+        export_format,
+        created_at: now.clone(),
+        updated_at: now,
+        meta: None,
+        agent_log: None,
     })
 }
 
@@ -447,29 +533,54 @@ pub fn update_pack(
     let now = Utc::now().to_rfc3339();
 
     if let Some(ref t) = title {
-        conn.execute("UPDATE packs SET title = ?1, updated_at = ?2 WHERE id = ?3", params![t, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            params![t, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref d) = description {
-        conn.execute("UPDATE packs SET description = ?1, updated_at = ?2 WHERE id = ?3", params![d, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET description = ?1, updated_at = ?2 WHERE id = ?3",
+            params![d, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref c) = constraints {
-        conn.execute("UPDATE packs SET constraints_text = ?1, updated_at = ?2 WHERE id = ?3", params![c, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET constraints_text = ?1, updated_at = ?2 WHERE id = ?3",
+            params![c, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref q) = questions {
-        conn.execute("UPDATE packs SET questions = ?1, updated_at = ?2 WHERE id = ?3", params![q, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET questions = ?1, updated_at = ?2 WHERE id = ?3",
+            params![q, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref ids) = item_ids {
         let json = serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string());
-        conn.execute("UPDATE packs SET item_ids = ?1, updated_at = ?2 WHERE id = ?3", params![json, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET item_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![json, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(ref f) = export_format {
-        conn.execute("UPDATE packs SET export_format = ?1, updated_at = ?2 WHERE id = ?3", params![f, now, id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE packs SET export_format = ?1, updated_at = ?2 WHERE id = ?3",
+            params![f, now, id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     let mut stmt = conn.prepare(
         "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
-    stmt.query_row(params![id], row_to_pack).map_err(|e| e.to_string())
+    stmt.query_row(params![id], row_to_pack)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -478,7 +589,9 @@ pub fn list_packs(db: State<'_, Database>, limit: u32) -> Result<Vec<ContextPack
     let mut stmt = conn.prepare(
         "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs ORDER BY updated_at DESC LIMIT ?1"
     ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![limit], row_to_pack).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], row_to_pack)
+        .map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -489,7 +602,9 @@ pub fn export_pack(db: State<'_, Database>, id: String, format: String) -> Resul
     let mut stmt = conn.prepare(
         "SELECT id, title, description, constraints_text, questions, item_ids, export_format, created_at, updated_at, meta, agent_log FROM packs WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
-    let pack = stmt.query_row(params![id], row_to_pack).map_err(|e| e.to_string())?;
+    let pack = stmt
+        .query_row(params![id], row_to_pack)
+        .map_err(|e| e.to_string())?;
 
     let mut items: Vec<CaptureItem> = Vec::new();
     for item_id in &pack.item_ids {
@@ -507,7 +622,8 @@ pub fn export_pack(db: State<'_, Database>, id: String, format: String) -> Resul
 #[tauri::command]
 pub fn delete_pack(db: State<'_, Database>, id: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM packs WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM packs WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -517,10 +633,14 @@ pub fn delete_pack(db: State<'_, Database>, id: String) -> Result<(), String> {
 pub fn get_settings(db: State<'_, Database>) -> Result<AppSettings, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut settings = AppSettings::default();
-    let mut stmt = conn.prepare("SELECT key, value FROM settings").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
 
     for row in rows.flatten() {
         match row.0.as_str() {
@@ -545,9 +665,15 @@ pub fn update_settings(db: State<'_, Database>, settings: AppSettings) -> Result
     let pairs = vec![
         ("capture_hotkey", settings.capture_hotkey),
         ("panel_hotkey", settings.panel_hotkey),
-        ("quick_tag_on_capture", settings.quick_tag_on_capture.to_string()),
+        (
+            "quick_tag_on_capture",
+            settings.quick_tag_on_capture.to_string(),
+        ),
         ("default_export_format", settings.default_export_format),
-        ("max_capture_size_kb", settings.max_capture_size_kb.to_string()),
+        (
+            "max_capture_size_kb",
+            settings.max_capture_size_kb.to_string(),
+        ),
         ("launch_at_login", settings.launch_at_login.to_string()),
         ("theme", settings.theme),
         ("language", settings.language),
@@ -585,7 +711,9 @@ pub fn check_accessibility() -> bool {
         }
     }
     #[cfg(not(target_os = "macos"))]
-    { true }
+    {
+        true
+    }
 }
 
 /// Refocus a specific app by name (used after overlay auto-dismiss)
@@ -595,14 +723,14 @@ pub fn refocus_app(app_name: String) {
     {
         use std::process::Command;
         // Sanitize: only allow alphanumeric, spaces, hyphens, dots (valid macOS app names)
-        let safe_name: String = app_name.chars()
+        let safe_name: String = app_name
+            .chars()
             .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '.')
             .collect();
-        if safe_name.is_empty() { return; }
-        let script = format!(
-            r#"tell application "{}" to activate"#,
-            safe_name
-        );
+        if safe_name.is_empty() {
+            return;
+        }
+        let script = format!(r#"tell application "{}" to activate"#, safe_name);
         let _ = Command::new("osascript").arg("-e").arg(&script).spawn();
     }
 }
@@ -631,20 +759,158 @@ pub fn open_accessibility_settings() {
     }
 }
 
-/// Called by overlay "Clip Text" button — detects foreground app NOW then emits event
+/// Open macOS Screen Recording preferences pane — wired up by the overlay's
+/// §4.2 permission-denied blocked state (single, clear CTA).
 #[tauri::command]
-pub fn trigger_text_capture(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let app_info = crate::source_detect::get_foreground_app();
-    let payload = serde_json::to_string(&app_info).unwrap_or_default();
-    let result = app_handle.emit("overlay-capture-text", payload).map_err(|e: tauri::Error| e.to_string());
-    result
+pub fn open_screen_capture_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        let _ = Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn();
+    }
 }
 
-/// Called by overlay "Screenshot" button — emits screenshot event
+/// Preflight macOS Screen Recording permission without triggering the system prompt.
+pub(crate) fn preflight_screen_capture_access() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+pub fn check_screen_capture_permission() -> bool {
+    preflight_screen_capture_access()
+}
+
+// ── Window position persistence (§4.2 + §4.3 mobility) ──
+//
+// Positions are stored as a single JSON blob alongside the database so they
+// survive app upgrades and schema migrations. Two labels are tracked today —
+// `overlay` and `panel` — with room for future surfaces.
+
+fn window_positions_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join(".research-inbox")
+        .join("window-positions.json")
+}
+
+fn read_positions_map() -> serde_json::Value {
+    let path = window_positions_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn write_positions_map(map: &serde_json::Value) {
+    let path = window_positions_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(map) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// Persist a window's logical position so it lands in the same place next launch.
+#[tauri::command]
+pub fn save_window_position(label: String, x: f64, y: f64) -> Result<(), String> {
+    let mut map = read_positions_map();
+    if let Some(obj) = map.as_object_mut() {
+        obj.insert(label, serde_json::json!({ "x": x, "y": y }));
+    }
+    write_positions_map(&map);
+    Ok(())
+}
+
+/// Return the saved logical position for a window label, if any.
+pub(crate) fn lookup_window_position(label: &str) -> Option<(f64, f64)> {
+    let map = read_positions_map();
+    let entry = map.get(label)?;
+    let x = entry.get("x").and_then(|v| v.as_f64())?;
+    let y = entry.get("y").and_then(|v| v.as_f64())?;
+    Some((x, y))
+}
+
+#[tauri::command]
+pub fn load_window_position(label: String) -> Option<(f64, f64)> {
+    lookup_window_position(&label)
+}
+
+/// Clear the saved position for a window and snap it back to its default anchor.
+/// `overlay` resets to top-center; `panel` resets to the tray-anchored default.
+#[tauri::command]
+pub fn reset_window_position(app_handle: tauri::AppHandle, label: String) -> Result<(), String> {
+    let mut map = read_positions_map();
+    if let Some(obj) = map.as_object_mut() {
+        obj.remove(&label);
+    }
+    write_positions_map(&map);
+
+    if let Some(w) = app_handle.get_webview_window(&label) {
+        if let Ok(Some(monitor)) = w.primary_monitor() {
+            let scale = monitor.scale_factor();
+            let screen_w = monitor.size().width as f64 / scale;
+            let screen_h = monitor.size().height as f64 / scale;
+            let (default_w, default_h, x, y) = match label.as_str() {
+                "overlay" => {
+                    let w = 468.0_f64;
+                    let x = ((screen_w - w) / 2.0).max(20.0);
+                    (w, 68.0_f64, x, 80.0_f64)
+                }
+                _ => {
+                    let pw = 520.0_f64;
+                    let ph = 760.0_f64;
+                    let x = ((screen_w - pw) / 2.0).max(20.0);
+                    let y = ((screen_h - ph) / 5.0).max(48.0);
+                    (pw, ph, x, y)
+                }
+            };
+            let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                default_w, default_h,
+            )));
+            if label == "panel" {
+                if let Err(err) = w.as_ref().window().move_window(AnchorPosition::TrayCenter) {
+                    let _ =
+                        w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+                    eprintln!("panel tray anchor failed: {}", err);
+                }
+            } else {
+                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+            }
+        }
+        let _ = app_handle.emit(&format!("{}-position-reset", label), ());
+    }
+    Ok(())
+}
+
+/// Called by overlay "Clip Text" button — runs the same text-capture flow as the
+/// hotkey, but without the screenshot fallback.
+#[tauri::command]
+pub fn trigger_text_capture(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::trigger_text_capture_flow(&app_handle);
+    Ok(())
+}
+
+/// Called by overlay "Screenshot" button — reuses the live screenshot event path
+/// already consumed by the overlay state machine.
 #[tauri::command]
 pub fn trigger_screenshot_capture(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let result = app_handle.emit("overlay-capture-screenshot", ()).map_err(|e: tauri::Error| e.to_string());
-    result
+    app_handle
+        .emit("screenshot-activate", ())
+        .map_err(|e: tauri::Error| e.to_string())
 }
 
 // ── AI Enrichment ──
@@ -661,24 +927,23 @@ pub async fn enrich_item(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     // Read item content
-    let content: String = conn.query_row(
-        "SELECT content FROM items WHERE id = ?1",
-        [&id],
-        |row| row.get(0),
-    ).map_err(|e| e.to_string())?;
+    let content: String = conn
+        .query_row("SELECT content FROM items WHERE id = ?1", [&id], |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?;
 
     drop(conn); // Release lock before processing
 
-    // Try LLM first; fall back to heuristic silently on any error
-    let enrichment = match pipeline::enrich_with_llm(&sidecar, &content) {
-        Ok(result) => result,
-        Err(_) => pipeline::enrich_content(&content),
+    let llm_result = pipeline::enrich_with_llm(&sidecar, &content)?;
+    let enrichment = Enrichment {
+        auto_tags: llm_result.auto_tags,
+        content_class: llm_result.content_class,
+        entities: llm_result.entities,
+        summary: llm_result.summary,
+        cluster_id: None,
     };
     let enrichment_json = serde_json::to_string(&enrichment).unwrap_or_else(|_| "{}".into());
-
-    // Compute embedding
-    let embedding = pipeline::compute_mock_embedding(&content);
-    let embedding_json = serde_json::to_string(&embedding).unwrap_or_else(|_| "[]".into());
 
     // Write to DB
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -689,12 +954,15 @@ pub async fn enrich_item(
     conn.execute(
         "UPDATE items SET enrichment = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![enrichment_json, now, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     // Merge auto_tags into existing tags
-    let existing_tags_str: String = conn.query_row(
-        "SELECT tags FROM items WHERE id = ?1", [&id], |row| row.get(0),
-    ).map_err(|e| e.to_string())?;
+    let existing_tags_str: String = conn
+        .query_row("SELECT tags FROM items WHERE id = ?1", [&id], |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?;
     let mut tags: Vec<String> = serde_json::from_str(&existing_tags_str).unwrap_or_default();
     for tag in &enrichment.auto_tags {
         if !tags.contains(tag) {
@@ -705,22 +973,28 @@ pub async fn enrich_item(
     conn.execute(
         "UPDATE items SET tags = ?1 WHERE id = ?2",
         rusqlite::params![tags_json, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
-    // Store embedding in vec_items
+    // Clear any legacy placeholder vector. Real embeddings require a dedicated
+    // embedding-capable runtime and should never be silently faked.
     conn.execute(
-        "INSERT OR REPLACE INTO vec_items (item_id, embedding) VALUES (?1, ?2)",
-        rusqlite::params![id, embedding_json],
-    ).map_err(|e| e.to_string())?;
+        "DELETE FROM vec_items WHERE item_id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
 
     drop(conn);
 
     // Emit event for frontend
-    let _ = app.emit("item-enriched", serde_json::json!({
-        "id": id,
-        "enrichment": enrichment,
-        "tags": tags,
-    }));
+    let _ = app.emit(
+        "item-enriched",
+        serde_json::json!({
+            "id": id,
+            "enrichment": enrichment,
+            "tags": tags,
+        }),
+    );
 
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -729,50 +1003,14 @@ pub async fn enrich_item(
 
 #[tauri::command]
 pub fn semantic_search(
-    db: tauri::State<'_, Database>,
-    query: String,
-    limit: u32,
+    _db: tauri::State<'_, Database>,
+    _query: String,
+    _limit: u32,
 ) -> Result<Vec<CaptureItem>, String> {
-    use crate::ai::{pipeline, vec};
-
-    // Compute query embedding
-    let query_embedding = pipeline::compute_mock_embedding(&query);
-
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-    // Load all embeddings from vec_items
-    let mut stmt = conn.prepare(
-        "SELECT item_id, embedding FROM vec_items"
-    ).map_err(|e| e.to_string())?;
-
-    let candidates: Vec<(String, Vec<f32>)> = stmt.query_map([], |row| {
-        let id: String = row.get(0)?;
-        let emb_json: String = row.get(1)?;
-        let emb: Vec<f32> = serde_json::from_str(&emb_json).unwrap_or_default();
-        Ok((id, emb))
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .filter(|(_, emb)| emb.len() == 384)
-    .collect();
-
-    // Find nearest
-    let nearest = vec::find_nearest(&query_embedding, &candidates, limit as usize);
-
-    // Load full items for the nearest IDs
-    let mut items = Vec::new();
-    for (item_id, _score) in &nearest {
-        if let Ok(item) = conn.query_row(
-            "SELECT id, content, content_type, source_app, source_url, source_title,
-                    tags, char_count, is_archived, created_at, updated_at, enrichment
-             FROM items WHERE id = ?1",
-            [item_id],
-            row_to_item,
-        ) {
-            items.push(item);
-        }
-    }
-
-    Ok(items)
+    Err(
+        "Semantic search is disabled until an embedding-capable local runtime is wired."
+            .to_string(),
+    )
 }
 
 // ── Clusters ──
@@ -780,24 +1018,28 @@ pub fn semantic_search(
 #[tauri::command]
 pub fn get_clusters(db: tauri::State<'_, Database>) -> Result<Vec<crate::models::Cluster>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, title, item_ids, centroid, created_at, updated_at
-         FROM clusters ORDER BY updated_at DESC"
-    ).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, title, item_ids, centroid, created_at, updated_at
+         FROM clusters ORDER BY updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let clusters = stmt.query_map([], |row| {
-        let item_ids_str: String = row.get(2)?;
-        Ok(crate::models::Cluster {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            item_ids: serde_json::from_str(&item_ids_str).unwrap_or_default(),
-            centroid: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+    let clusters = stmt
+        .query_map([], |row| {
+            let item_ids_str: String = row.get(2)?;
+            Ok(crate::models::Cluster {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                item_ids: serde_json::from_str(&item_ids_str).unwrap_or_default(),
+                centroid: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(clusters)
 }
@@ -805,13 +1047,17 @@ pub fn get_clusters(db: tauri::State<'_, Database>) -> Result<Vec<crate::models:
 // ── Helpers ──
 
 fn tag_color_index(tag: &str) -> i64 {
-    let hash: u32 = tag.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let hash: u32 = tag
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
     (hash % 8) as i64
 }
 
 /// Format a timestamp like "2026-03-28T12:44:30.973176+00:00" into "Mar 28, 12:44"
 fn fmt_time(iso: &str) -> String {
-    let months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     if iso.len() >= 16 {
         let month_idx: usize = iso[5..7].parse().unwrap_or(1);
         let day: &str = &iso[8..10];
@@ -826,74 +1072,194 @@ fn fmt_time(iso: &str) -> String {
 /// Build a source line, omitting empty fields
 fn fmt_source(app: &str, url: Option<&str>, title: Option<&str>) -> String {
     let mut parts = vec![app.to_string()];
-    if let Some(u) = url { if !u.is_empty() { parts.push(u.to_string()); } }
-    if let Some(t) = title { if !t.is_empty() { parts.push(t.to_string()); } }
+    if let Some(u) = url {
+        if !u.is_empty() {
+            parts.push(u.to_string());
+        }
+    }
+    if let Some(t) = title {
+        if !t.is_empty() {
+            parts.push(t.to_string());
+        }
+    }
     parts.join(" | ")
 }
 
 pub fn format_pack(pack: &ContextPack, items: &[CaptureItem], format: &str) -> String {
-    let title = if pack.title.is_empty() { "Context Pack" } else { &pack.title };
+    let title = if pack.title.is_empty() {
+        "Context Pack"
+    } else {
+        &pack.title
+    };
     let desc = pack.description.as_deref().unwrap_or("");
     let constraints = pack.constraints.as_deref().unwrap_or("");
     let questions = pack.questions.as_deref().unwrap_or("");
-    let date = if pack.created_at.len() >= 10 { &pack.created_at[..10] } else { &pack.created_at };
+    let date = if pack.created_at.len() >= 10 {
+        &pack.created_at[..10]
+    } else {
+        &pack.created_at
+    };
 
     match format {
         "claude" => {
             let mut out = String::from("<context>\n");
-            if !title.is_empty() { out.push_str(&format!("<title>{}</title>\n", title)); }
-            out.push_str(&format!("<summary>{}</summary>\n\n<evidence count=\"{}\">\n", desc, items.len()));
+            if !title.is_empty() {
+                out.push_str(&format!("<title>{}</title>\n", title));
+            }
+            out.push_str(&format!(
+                "<summary>{}</summary>\n\n<evidence count=\"{}\">\n",
+                desc,
+                items.len()
+            ));
             for item in items {
-                let mut attrs = format!("source=\"{}\" date=\"{}\"", item.source_app, fmt_time(&item.created_at));
-                if let Some(ref u) = item.source_url { if !u.is_empty() { attrs.push_str(&format!(" url=\"{}\"", u)); } }
+                let mut attrs = format!(
+                    "source=\"{}\" date=\"{}\"",
+                    item.source_app,
+                    fmt_time(&item.created_at)
+                );
+                if let Some(ref u) = item.source_url {
+                    if !u.is_empty() {
+                        attrs.push_str(&format!(" url=\"{}\"", u));
+                    }
+                }
                 out.push_str(&format!("<item {}>\n{}\n</item>\n", attrs, item.content));
             }
             out.push_str("</evidence>\n\n");
-            out.push_str(&format!("<constraints>\n{}\n</constraints>\n\n", if constraints.is_empty() { "None specified" } else { constraints }));
-            out.push_str(&format!("<questions>\n{}\n</questions>\n", if questions.is_empty() { "None specified" } else { questions }));
+            out.push_str(&format!(
+                "<constraints>\n{}\n</constraints>\n\n",
+                if constraints.is_empty() {
+                    "None specified"
+                } else {
+                    constraints
+                }
+            ));
+            out.push_str(&format!(
+                "<questions>\n{}\n</questions>\n",
+                if questions.is_empty() {
+                    "None specified"
+                } else {
+                    questions
+                }
+            ));
             out.push_str("</context>\n");
             out
         }
         "chatgpt" => {
             let mut out = format!("# Context Pack: {}\n\n", title);
-            if !desc.is_empty() { out.push_str(&format!("**Summary:** {}\n\n", desc)); }
+            if !desc.is_empty() {
+                out.push_str(&format!("**Summary:** {}\n\n", desc));
+            }
             out.push_str(&format!("**Evidence ({} items):**\n\n", items.len()));
             for (i, item) in items.iter().enumerate() {
-                let source = fmt_source(&item.source_app, item.source_url.as_deref(), item.source_title.as_deref());
-                out.push_str(&format!("{}. **[{}]** ({})\n   {}\n\n", i + 1, item.source_app, fmt_time(&item.created_at), item.content));
+                let source = fmt_source(
+                    &item.source_app,
+                    item.source_url.as_deref(),
+                    item.source_title.as_deref(),
+                );
+                out.push_str(&format!(
+                    "{}. **[{}]** ({})\n   {}\n\n",
+                    i + 1,
+                    item.source_app,
+                    fmt_time(&item.created_at),
+                    item.content
+                ));
                 out.push_str(&format!("   _Source: {}_\n\n", source));
             }
-            out.push_str(&format!("**Constraints:** {}\n\n", if constraints.is_empty() { "None specified" } else { constraints }));
-            out.push_str(&format!("**Questions:** {}\n", if questions.is_empty() { "None specified" } else { questions }));
+            out.push_str(&format!(
+                "**Constraints:** {}\n\n",
+                if constraints.is_empty() {
+                    "None specified"
+                } else {
+                    constraints
+                }
+            ));
+            out.push_str(&format!(
+                "**Questions:** {}\n",
+                if questions.is_empty() {
+                    "None specified"
+                } else {
+                    questions
+                }
+            ));
             out
         }
         "cursor" => {
             let mut out = format!("# Project Context: {}\n\n", title);
-            if !desc.is_empty() { out.push_str(&format!("## Background\n{}\n\n", desc)); }
+            if !desc.is_empty() {
+                out.push_str(&format!("## Background\n{}\n\n", desc));
+            }
             out.push_str(&format!("## Research Evidence ({} items)\n\n", items.len()));
             for item in items {
-                let source = fmt_source(&item.source_app, item.source_url.as_deref(), item.source_title.as_deref());
-                out.push_str(&format!("- **[{}]** {} ({})\n", source, item.content, fmt_time(&item.created_at)));
+                let source = fmt_source(
+                    &item.source_app,
+                    item.source_url.as_deref(),
+                    item.source_title.as_deref(),
+                );
+                out.push_str(&format!(
+                    "- **[{}]** {} ({})\n",
+                    source,
+                    item.content,
+                    fmt_time(&item.created_at)
+                ));
             }
-            out.push_str(&format!("\n## Constraints\n{}\n\n## Open Questions\n{}\n",
-                if constraints.is_empty() { "None specified" } else { constraints },
-                if questions.is_empty() { "None specified" } else { questions }));
+            out.push_str(&format!(
+                "\n## Constraints\n{}\n\n## Open Questions\n{}\n",
+                if constraints.is_empty() {
+                    "None specified"
+                } else {
+                    constraints
+                },
+                if questions.is_empty() {
+                    "None specified"
+                } else {
+                    questions
+                }
+            ));
             out
         }
         _ => {
             // Markdown (default)
             let mut out = format!("# {}\n\n", title);
-            if !desc.is_empty() { out.push_str(&format!("> {}\n\n", desc)); }
+            if !desc.is_empty() {
+                out.push_str(&format!("> {}\n\n", desc));
+            }
             out.push_str(&format!("## Evidence ({} items)\n\n", items.len()));
             for (i, item) in items.iter().enumerate() {
-                let source = fmt_source(&item.source_app, item.source_url.as_deref(), item.source_title.as_deref());
-                out.push_str(&format!("### {}. {} – {}\n", i + 1, item.source_app, fmt_time(&item.created_at)));
+                let source = fmt_source(
+                    &item.source_app,
+                    item.source_url.as_deref(),
+                    item.source_title.as_deref(),
+                );
+                out.push_str(&format!(
+                    "### {}. {} – {}\n",
+                    i + 1,
+                    item.source_app,
+                    fmt_time(&item.created_at)
+                ));
                 out.push_str(&format!("{}\n\n", item.content));
                 out.push_str(&format!("_Source: {}_\n\n", source));
             }
-            out.push_str(&format!("## Constraints & Decisions\n{}\n\n", if constraints.is_empty() { "None specified" } else { constraints }));
-            out.push_str(&format!("## Questions for AI\n{}\n\n", if questions.is_empty() { "None specified" } else { questions }));
-            out.push_str(&format!("---\n*Context Pack by Research Inbox | {} items | {}*\n", items.len(), date));
+            out.push_str(&format!(
+                "## Constraints & Decisions\n{}\n\n",
+                if constraints.is_empty() {
+                    "None specified"
+                } else {
+                    constraints
+                }
+            ));
+            out.push_str(&format!(
+                "## Questions for AI\n{}\n\n",
+                if questions.is_empty() {
+                    "None specified"
+                } else {
+                    questions
+                }
+            ));
+            out.push_str(&format!(
+                "---\n*Context Pack by Research Inbox | {} items | {}*\n",
+                items.len(),
+                date
+            ));
             out
         }
     }
@@ -905,7 +1271,10 @@ mod tests {
 
     #[test]
     fn test_fmt_time() {
-        assert_eq!(fmt_time("2026-03-28T12:44:30.973176+00:00"), "Mar 28, 12:44");
+        assert_eq!(
+            fmt_time("2026-03-28T12:44:30.973176+00:00"),
+            "Mar 28, 12:44"
+        );
         assert_eq!(fmt_time("2026-01-05T09:01:00Z"), "Jan 5, 09:01");
         assert_eq!(fmt_time("short"), "short");
     }
@@ -932,24 +1301,42 @@ mod tests {
     fn test_tag_color_index_range() {
         for tag in &["rust", "react", "ux", "design", "backend", "frontend"] {
             let idx = tag_color_index(tag);
-            assert!(idx >= 0 && idx < 8, "Color index {} out of range for tag '{}'", idx, tag);
+            assert!(
+                idx >= 0 && idx < 8,
+                "Color index {} out of range for tag '{}'",
+                idx,
+                tag
+            );
         }
     }
 
     #[test]
     fn test_format_pack_markdown() {
         let pack = ContextPack {
-            id: "p1".into(), title: "Test Pack".into(), description: Some("A test".into()),
-            constraints: Some("Be concise".into()), questions: Some("What is X?".into()),
-            item_ids: vec!["i1".into()], export_format: "markdown".into(),
-            created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
-            meta: None, agent_log: None,
+            id: "p1".into(),
+            title: "Test Pack".into(),
+            description: Some("A test".into()),
+            constraints: Some("Be concise".into()),
+            questions: Some("What is X?".into()),
+            item_ids: vec!["i1".into()],
+            export_format: "markdown".into(),
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None,
+            agent_log: None,
         };
         let items = vec![CaptureItem {
-            id: "i1".into(), content: "Hello world".into(), content_type: "text".into(),
-            source_app: "Chrome".into(), source_url: Some("https://example.com".into()),
-            source_title: Some("Example".into()), tags: vec![], char_count: 11,
-            is_archived: false, created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
+            id: "i1".into(),
+            content: "Hello world".into(),
+            content_type: "text".into(),
+            source_app: "Chrome".into(),
+            source_url: Some("https://example.com".into()),
+            source_title: Some("Example".into()),
+            tags: vec![],
+            char_count: 11,
+            is_archived: false,
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
             enrichment: None,
         }];
         let out = format_pack(&pack, &items, "markdown");
@@ -962,11 +1349,17 @@ mod tests {
     #[test]
     fn test_format_pack_claude_xml() {
         let pack = ContextPack {
-            id: "p1".into(), title: "XML Test".into(), description: Some("desc".into()),
-            constraints: None, questions: None,
-            item_ids: vec![], export_format: "claude".into(),
-            created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
-            meta: None, agent_log: None,
+            id: "p1".into(),
+            title: "XML Test".into(),
+            description: Some("desc".into()),
+            constraints: None,
+            questions: None,
+            item_ids: vec![],
+            export_format: "claude".into(),
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None,
+            agent_log: None,
         };
         let out = format_pack(&pack, &[], "claude");
         assert!(out.contains("<context>"));
@@ -992,7 +1385,9 @@ mod tests {
             rusqlite::params![id, "test content", "TestApp", 12i64, now, now],
         ).expect("insert");
 
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -1067,17 +1462,30 @@ mod tests {
     #[test]
     fn test_format_pack_chatgpt() {
         let pack = ContextPack {
-            id: "p1".into(), title: "GPT Test".into(), description: Some("summary".into()),
-            constraints: Some("constraint1".into()), questions: Some("q1".into()),
-            item_ids: vec!["i1".into()], export_format: "chatgpt".into(),
-            created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
-            meta: None, agent_log: None,
+            id: "p1".into(),
+            title: "GPT Test".into(),
+            description: Some("summary".into()),
+            constraints: Some("constraint1".into()),
+            questions: Some("q1".into()),
+            item_ids: vec!["i1".into()],
+            export_format: "chatgpt".into(),
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None,
+            agent_log: None,
         };
         let items = vec![CaptureItem {
-            id: "i1".into(), content: "Test content".into(), content_type: "text".into(),
-            source_app: "Slack".into(), source_url: None, source_title: Some("Channel".into()),
-            tags: vec![], char_count: 12, is_archived: false,
-            created_at: "2026-03-28T14:30:00Z".into(), updated_at: "2026-03-28T14:30:00Z".into(),
+            id: "i1".into(),
+            content: "Test content".into(),
+            content_type: "text".into(),
+            source_app: "Slack".into(),
+            source_url: None,
+            source_title: Some("Channel".into()),
+            tags: vec![],
+            char_count: 12,
+            is_archived: false,
+            created_at: "2026-03-28T14:30:00Z".into(),
+            updated_at: "2026-03-28T14:30:00Z".into(),
             enrichment: None,
         }];
         let out = format_pack(&pack, &items, "chatgpt");
@@ -1090,11 +1498,17 @@ mod tests {
     #[test]
     fn test_format_pack_cursor() {
         let pack = ContextPack {
-            id: "p1".into(), title: "Cursor Test".into(), description: Some("bg".into()),
-            constraints: None, questions: None,
-            item_ids: vec![], export_format: "cursor".into(),
-            created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
-            meta: None, agent_log: None,
+            id: "p1".into(),
+            title: "Cursor Test".into(),
+            description: Some("bg".into()),
+            constraints: None,
+            questions: None,
+            item_ids: vec![],
+            export_format: "cursor".into(),
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None,
+            agent_log: None,
         };
         let out = format_pack(&pack, &[], "cursor");
         assert!(out.contains("# Project Context: Cursor Test"));
@@ -1105,14 +1519,23 @@ mod tests {
     #[test]
     fn test_format_pack_empty_title() {
         let pack = ContextPack {
-            id: "p1".into(), title: "".into(), description: None,
-            constraints: None, questions: None,
-            item_ids: vec![], export_format: "markdown".into(),
-            created_at: "2026-03-28T12:00:00Z".into(), updated_at: "2026-03-28T12:00:00Z".into(),
-            meta: None, agent_log: None,
+            id: "p1".into(),
+            title: "".into(),
+            description: None,
+            constraints: None,
+            questions: None,
+            item_ids: vec![],
+            export_format: "markdown".into(),
+            created_at: "2026-03-28T12:00:00Z".into(),
+            updated_at: "2026-03-28T12:00:00Z".into(),
+            meta: None,
+            agent_log: None,
         };
         let out = format_pack(&pack, &[], "markdown");
-        assert!(out.contains("# Context Pack"), "Empty title should use fallback");
+        assert!(
+            out.contains("# Context Pack"),
+            "Empty title should use fallback"
+        );
     }
 
     #[test]
@@ -1132,7 +1555,13 @@ mod tests {
             rusqlite::params![now],
         ).expect("upsert tag");
 
-        let count: i64 = conn.query_row("SELECT use_count FROM tags WHERE name = 'test-tag'", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT use_count FROM tags WHERE name = 'test-tag'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 2, "Tag use_count should be incremented on upsert");
     }
 
@@ -1147,16 +1576,25 @@ mod tests {
             rusqlite::params![now, now],
         ).expect("insert pack");
 
-        let title: String = conn.query_row("SELECT title FROM packs WHERE id = 'p1'", [], |r| r.get(0)).unwrap();
+        let title: String = conn
+            .query_row("SELECT title FROM packs WHERE id = 'p1'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(title, "Test");
 
-        let item_ids: String = conn.query_row("SELECT item_ids FROM packs WHERE id = 'p1'", [], |r| r.get(0)).unwrap();
+        let item_ids: String = conn
+            .query_row("SELECT item_ids FROM packs WHERE id = 'p1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         let ids: Vec<String> = serde_json::from_str(&item_ids).unwrap();
         assert_eq!(ids, vec!["i1", "i2"]);
 
         // Delete
-        conn.execute("DELETE FROM packs WHERE id = 'p1'", []).expect("delete");
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM packs", [], |r| r.get(0)).unwrap();
+        conn.execute("DELETE FROM packs WHERE id = 'p1'", [])
+            .expect("delete");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM packs", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -1166,15 +1604,21 @@ mod tests {
         let conn = db.conn.lock().unwrap();
 
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('theme', 'dark')", [],
-        ).expect("insert");
+            "INSERT INTO settings (key, value) VALUES ('theme', 'dark')",
+            [],
+        )
+        .expect("insert");
 
         // Upsert
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('theme', 'light') ON CONFLICT(key) DO UPDATE SET value = 'light'", [],
         ).expect("upsert");
 
-        let val: String = conn.query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| r.get(0)).unwrap();
+        let val: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(val, "light");
     }
 
@@ -1191,24 +1635,40 @@ mod tests {
         ).expect("insert");
 
         // FTS should find original
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'xyz'", [], |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'xyz'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
 
         // Update content
-        conn.execute("UPDATE items SET content = 'updated content abc' WHERE id = 'u1'", []).expect("update");
+        conn.execute(
+            "UPDATE items SET content = 'updated content abc' WHERE id = 'u1'",
+            [],
+        )
+        .expect("update");
 
         // FTS should find new content
-        let count_new: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'abc'", [], |r| r.get(0),
-        ).unwrap();
+        let count_new: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'abc'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count_new, 1, "FTS should find updated content");
 
         // FTS should NOT find old content
-        let count_old: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'xyz'", [], |r| r.get(0),
-        ).unwrap();
+        let count_old: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'xyz'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count_old, 0, "FTS should not find old content after update");
     }
 
@@ -1224,11 +1684,16 @@ mod tests {
             rusqlite::params![now, now],
         ).expect("insert");
 
-        conn.execute("DELETE FROM items WHERE id = 'd1'", []).expect("delete");
+        conn.execute("DELETE FROM items WHERE id = 'd1'", [])
+            .expect("delete");
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'zzz'", [], |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'zzz'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 0, "FTS should be cleaned up after delete");
     }
 
@@ -1266,22 +1731,163 @@ mod tests {
         }
 
         // Query ordered by created_at DESC
-        let mut stmt = conn.prepare("SELECT id FROM items ORDER BY created_at DESC LIMIT 5").unwrap();
-        let ids: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect();
-        assert_eq!(ids, vec!["id4", "id3", "id2", "id1", "id0"], "Items should be newest first");
+        let mut stmt = conn
+            .prepare("SELECT id FROM items ORDER BY created_at DESC LIMIT 5")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["id4", "id3", "id2", "id1", "id0"],
+            "Items should be newest first"
+        );
     }
 }
 
 // ── Model / Hardware ──
 
+const MODEL_FILENAME: &str = "gemma-4-e2b-it-Q8_0.gguf";
+
+fn model_install_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home)
+        .join(".research-inbox")
+        .join("models")
+        .join(MODEL_FILENAME)
+}
+
+fn staged_model_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(path) = std::env::var("RI_MODEL_SOURCE") {
+        candidates.push(PathBuf::from(path));
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(tool_root) = manifest_dir.parent().and_then(|p| p.parent()) {
+        candidates.push(tool_root.join("Gemma").join(MODEL_FILENAME));
+    }
+
+    candidates
+}
+
+fn find_staged_model_source() -> Option<PathBuf> {
+    staged_model_candidates()
+        .into_iter()
+        .find(|path| path.exists())
+}
+
+fn emit_model_progress(
+    app: &tauri::AppHandle,
+    status: &str,
+    downloaded: u64,
+    total: u64,
+    message: &str,
+) {
+    let percent = if total > 0 {
+        ((downloaded as f64 / total as f64) * 100.0).round() as u64
+    } else if status == "ready" {
+        100
+    } else {
+        0
+    };
+
+    let _ = app.emit(
+        "model-download-progress",
+        serde_json::json!({
+            "downloaded": downloaded,
+            "total": total,
+            "percent": percent,
+            "status": status,
+            "message": message,
+        }),
+    );
+}
+
+fn sha256_hex(path: &Path) -> Result<String, String> {
+    let output = Command::new("shasum")
+        .args(["-a", "256"])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("Failed to run shasum for {}: {}", path.display(), e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "shasum failed for {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .split_whitespace()
+        .next()
+        .map(|hash| hash.to_string())
+        .ok_or_else(|| format!("Could not parse shasum output for {}", path.display()))
+}
+
+fn copy_model_with_progress(
+    source_path: &Path,
+    target_path: &Path,
+    app: &tauri::AppHandle,
+) -> Result<(), String> {
+    let total = fs::metadata(source_path)
+        .map_err(|e| format!("Failed to stat {}: {}", source_path.display(), e))?
+        .len();
+
+    let mut source = File::open(source_path)
+        .map_err(|e| format!("Failed to open {}: {}", source_path.display(), e))?;
+    let mut target = File::create(target_path)
+        .map_err(|e| format!("Failed to create {}: {}", target_path.display(), e))?;
+
+    let mut copied = 0u64;
+    let mut buffer = vec![0u8; 8 * 1024 * 1024];
+
+    loop {
+        let read = source
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed reading {}: {}", source_path.display(), e))?;
+        if read == 0 {
+            break;
+        }
+
+        target
+            .write_all(&buffer[..read])
+            .map_err(|e| format!("Failed writing {}: {}", target_path.display(), e))?;
+
+        copied += read as u64;
+        emit_model_progress(app, "copying", copied, total, "Copying local model");
+    }
+
+    target
+        .flush()
+        .map_err(|e| format!("Failed flushing {}: {}", target_path.display(), e))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn check_model_status() -> Result<serde_json::Value, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let model_path = format!("{}/.research-inbox/models/gemma-4-E2B-it-Q8_0.gguf", home);
-    let exists = std::path::Path::new(&model_path).exists();
+    let model_path = model_install_path();
+    let source_path = find_staged_model_source();
+    let exists = model_path.exists();
+    let size_bytes = fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+    let source_size_bytes = source_path
+        .as_ref()
+        .and_then(|path| fs::metadata(path).ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
     Ok(serde_json::json!({
         "downloaded": exists,
-        "path": model_path,
+        "path": model_path.to_string_lossy().to_string(),
+        "size_bytes": size_bytes,
+        "source_available": source_path.is_some(),
+        "source_path": source_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+        "source_size_bytes": source_size_bytes,
     }))
 }
 
@@ -1303,30 +1909,67 @@ pub fn check_hardware() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub async fn download_model(app: tauri::AppHandle) -> Result<String, String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    let model_dir = format!("{}/.research-inbox/models", home);
-    std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
-
-    let model_path = format!("{}/gemma-4-E2B-it-Q8_0.gguf", model_dir);
-
-    // Already downloaded?
-    if std::path::Path::new(&model_path).exists() {
-        return Ok(model_path);
+pub fn download_model(
+    app: tauri::AppHandle,
+    sidecar: tauri::State<'_, std::sync::Arc<crate::ai::sidecar::SidecarManager>>,
+) -> Result<String, String> {
+    let hardware = check_hardware()?;
+    if !hardware["meets_minimum"].as_bool().unwrap_or(false) {
+        return Err("This machine does not meet the 8GB RAM minimum for local AI.".to_string());
     }
 
-    // For alpha: emit a placeholder progress event and return error.
-    // Real download will be wired when we have the actual model URL.
-    let _ = app.emit("model-download-progress", serde_json::json!({
-        "downloaded": 0,
-        "total": 0,
-        "percent": 0,
-        "status": "not_available",
-    }));
+    let source_path = find_staged_model_source().ok_or_else(|| {
+        "Gemma model source not found. Expected a staged file in ../Gemma or RI_MODEL_SOURCE."
+            .to_string()
+    })?;
+    let model_path = model_install_path();
+    let model_dir = model_path
+        .parent()
+        .ok_or_else(|| "Invalid model install path".to_string())?;
+    fs::create_dir_all(model_dir).map_err(|e| e.to_string())?;
 
-    // Don't add reqwest dependency yet – just return the path placeholder.
-    // The actual HTTP download will be added when Gemma 4 GGUF URL is available.
-    Err("Model download not yet available. Place model manually at: ".to_string() + &model_path)
+    let total = fs::metadata(&source_path)
+        .map_err(|e| format!("Failed to stat {}: {}", source_path.display(), e))?
+        .len();
+
+    if model_path.exists() {
+        emit_model_progress(&app, "verifying", total, total, "Verifying installed model");
+        let installed_hash = sha256_hex(&model_path)?;
+        let source_hash = sha256_hex(&source_path)?;
+        if installed_hash == source_hash {
+            sidecar.refresh_model_state();
+            emit_model_progress(&app, "ready", total, total, "Model ready");
+            return Ok(model_path.to_string_lossy().to_string());
+        }
+        let _ = fs::remove_file(&model_path);
+    }
+
+    let temp_path = model_path.with_extension("partial");
+    let _ = fs::remove_file(&temp_path);
+
+    emit_model_progress(&app, "preparing", 0, total, "Preparing model install");
+    copy_model_with_progress(&source_path, &temp_path, &app)?;
+    emit_model_progress(&app, "verifying", total, total, "Verifying model integrity");
+
+    let source_hash = sha256_hex(&source_path)?;
+    let temp_hash = sha256_hex(&temp_path)?;
+    if source_hash != temp_hash {
+        let _ = fs::remove_file(&temp_path);
+        return Err("Model checksum mismatch after install.".to_string());
+    }
+
+    fs::rename(&temp_path, &model_path).map_err(|e| {
+        format!(
+            "Failed to finalize model install {} -> {}: {}",
+            temp_path.display(),
+            model_path.display(),
+            e
+        )
+    })?;
+    sidecar.refresh_model_state();
+    emit_model_progress(&app, "ready", total, total, "Model ready");
+
+    Ok(model_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1345,16 +1988,27 @@ pub fn chat_pack_agent(
     instruction: String,
 ) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (title, description, item_ids_str, agent_log_str): (String, Option<String>, String, Option<String>) = conn.query_row(
-        "SELECT title, description, item_ids, agent_log FROM packs WHERE id = ?1",
-        [&pack_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).map_err(|e| e.to_string())?;
+    let (title, description, item_ids_str, agent_log_str): (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT title, description, item_ids, agent_log FROM packs WHERE id = ?1",
+            [&pack_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|e| e.to_string())?;
     let item_ids: Vec<String> = serde_json::from_str(&item_ids_str).unwrap_or_default();
     drop(conn);
 
     let result = crate::ai::pack_agent::chat_modify_pack(
-        &db, &title, description.as_deref().unwrap_or(""), &item_ids, &instruction,
+        &db,
+        &title,
+        description.as_deref().unwrap_or(""),
+        &item_ids,
+        &instruction,
     )?;
 
     // Update pack + append to agent_log
@@ -1367,8 +2021,13 @@ pub fn chat_pack_agent(
     log.push(serde_json::json!({"ts": &now, "role": "ai", "content": result["diff_summary"]}));
     let log_json = serde_json::to_string(&log).unwrap_or_else(|_| "[]".into());
 
-    let new_item_ids = result["item_ids"].as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>())
+    let new_item_ids = result["item_ids"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
         .unwrap_or(item_ids);
     let new_ids_json = serde_json::to_string(&new_item_ids).unwrap_or_else(|_| "[]".into());
 
@@ -1376,7 +2035,8 @@ pub fn chat_pack_agent(
     conn.execute(
         "UPDATE packs SET item_ids = ?1, agent_log = ?2, updated_at = ?3 WHERE id = ?4",
         rusqlite::params![new_ids_json, log_json, now, pack_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(result)
 }

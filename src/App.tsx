@@ -1,28 +1,27 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useStore } from "./lib/store";
-import { api } from "./lib/ipc";
 import { setLanguage } from "./lib/i18n";
 import Toast from "./components/Toast";
 import InboxPanel from "./components/InboxPanel";
-import PackEditor from "./components/PackEditor";
 import PackView from "./components/PackView";
 import Settings from "./components/Settings";
 import PacksList from "./components/PacksList";
 import Onboarding from "./components/Onboarding";
-import type { AppInfo } from "./types";
 
 export default function App() {
-  const { view, loadItems, loadSettings, loadTags, showToast, settings } = useStore();
+  const { view, loadItems, loadSettings, loadTags, settings } = useStore();
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
-  // Apply theme to document root (reactive – updates when settings change)
+  // Apply theme to document root (reactive – updates when settings change).
+  // Default to "dark" immediately so the first paint matches the Well design
+  // rather than flashing whatever the OS theme happens to be.
   useEffect(() => {
-    if (settings?.theme) {
-      document.documentElement.setAttribute("data-theme", settings.theme);
-    }
+    document.documentElement.setAttribute(
+      "data-theme",
+      settings?.theme || "dark",
+    );
   }, [settings?.theme]);
 
   // Check if onboarding was completed
@@ -38,84 +37,47 @@ export default function App() {
     if (settings?.language) setLanguage(settings.language);
   }, [settings?.language]);
 
+  useEffect(() => {
+    const currentWindow = getCurrentWindow();
+    const timer = window.setTimeout(() => {
+      currentWindow.show().catch(() => {});
+      currentWindow.unminimize().catch(() => {});
+      currentWindow.setFocus().catch(() => {});
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // §4.3 Inbox mobility — persist panel position on move. Rust clamps and
+  // restores it before the window becomes visible again.
+  useEffect(() => {
+    const currentWindow = getCurrentWindow();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unlisten = currentWindow.onMoved(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        try {
+          const visible = await currentWindow.isVisible();
+          if (!visible) return;
+          const pos = await currentWindow.outerPosition();
+          const scale = await currentWindow.scaleFactor();
+          await invoke("save_window_position", {
+            label: "panel",
+            x: pos.x / scale,
+            y: pos.y / scale,
+          });
+        } catch {}
+      }, 220);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   const completeOnboarding = () => {
     localStorage.setItem("ri-onboarded", "true");
     setOnboarded(true);
   };
-
-  // ⇧⌘S capture — tries selected text first (no clipboard touch), falls back to clipboard
-  useEffect(() => {
-    const unlisten = listen<string>("capture-triggered", async (event) => {
-      try {
-        let appName = "Clipboard";
-        let windowTitle = "";
-        let urlFromTitle: string | null = null;
-        let selectedText: string | null = null;
-
-        try {
-          if (event.payload) {
-            const data = JSON.parse(event.payload);
-            appName = data.app_name || "Clipboard";
-            windowTitle = data.window_title || "";
-            urlFromTitle = data.url_from_title || null;
-            selectedText = data.selected_text || null;
-          }
-        } catch {}
-
-        // Use selected text if available, otherwise fall back to clipboard
-        let content = selectedText;
-        if (!content || content.trim() === "") {
-          content = await readText();
-        }
-
-        if (!content || content.trim() === "") {
-          showToast("Nothing selected or in clipboard");
-          return;
-        }
-
-        const maxSize = (settings?.max_capture_size_kb || 50) * 1024;
-        if (content.length > maxSize) content = content.slice(0, maxSize);
-
-        const isDup = await invoke<boolean>("check_duplicate", { content });
-        if (isDup) {
-          showToast("Already captured");
-          return;
-        }
-
-        await api.capture(content, appName, urlFromTitle, windowTitle || null, []);
-
-        const preview = content.slice(0, 40);
-        const source = selectedText ? appName : "clipboard";
-        showToast(`Captured from ${source}: "${preview}..."`);
-        loadItems();
-        loadTags();
-      } catch {
-        showToast("Capture failed");
-      }
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, [settings]);
-
-  // Screenshot capture
-  useEffect(() => {
-    const unlisten = listen("screenshot-triggered", async () => {
-      try {
-        showToast("Select a screen region...");
-        const item = await invoke<any>("capture_screenshot", { tags: [] });
-        const preview = item.content.slice(0, 40);
-        showToast(`Screenshot from ${item.source_app}: "${preview}..."`);
-        loadItems();
-        loadTags();
-      } catch (err: any) {
-        if (err?.toString().includes("cancelled")) {
-          showToast("Screenshot cancelled");
-        } else {
-          showToast(`Screenshot failed: ${err}`);
-        }
-      }
-    });
-    return () => { unlisten.then((f) => f()); };
-  }, []);
 
   // Escape to navigate back
   useEffect(() => {
@@ -149,14 +111,21 @@ export default function App() {
     return <Onboarding onComplete={completeOnboarding} />;
   }
 
-  return (
-    <div className="h-screen flex flex-col bg-[var(--well-void)] text-[var(--text-1)]">
-      <Toast />
+  const content = (
+    <>
       {(view === "inbox" || view === "topics") && <InboxPanel />}
       {view === "packs" && <PacksList />}
-      {view === "pack-editor" && <PackEditor />}
       {view === "pack-view" && <PackView />}
       {view === "settings" && <Settings />}
+    </>
+  );
+
+  return (
+    <div className="panel-stage text-[var(--text-1)]">
+      <Toast />
+      <div className="panel-shell">
+        {content}
+      </div>
     </div>
   );
 }

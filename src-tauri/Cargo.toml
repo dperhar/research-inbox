@@ -25,9 +25,15 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-positioner = { version = "2.0.0", features = ["tray-icon"] }
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+rusqlite = { version = "0.31", features = ["bundled", "vtab", "load_extension"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+sqlite-vec = "0.1"
+window-vibrancy = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

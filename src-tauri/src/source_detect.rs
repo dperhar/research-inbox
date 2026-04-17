@@ -42,7 +42,17 @@ pub fn get_foreground_app() -> AppInfo {
 }
 
 pub fn extract_url_from_title(title: &str, app_name: &str) -> Option<String> {
-    let browsers = ["Google Chrome", "Chrome", "Arc", "Safari", "Firefox", "Edge", "Brave", "Opera", "Vivaldi"];
+    let browsers = [
+        "Google Chrome",
+        "Chrome",
+        "Arc",
+        "Safari",
+        "Firefox",
+        "Edge",
+        "Brave",
+        "Opera",
+        "Vivaldi",
+    ];
     if !browsers.iter().any(|b| app_name.contains(b)) {
         return None;
     }

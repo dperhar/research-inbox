@@ -51,7 +51,14 @@ export const api = {
 
   // Model / Hardware
   checkModelStatus: () =>
-    invoke<{ downloaded: boolean; path: string }>("check_model_status"),
+    invoke<{
+      downloaded: boolean;
+      path: string;
+      size_bytes: number;
+      source_available: boolean;
+      source_path: string | null;
+      source_size_bytes: number;
+    }>("check_model_status"),
   checkHardware: () =>
     invoke<{ ram_gb: number; meets_minimum: boolean }>("check_hardware"),
   downloadModel: () =>

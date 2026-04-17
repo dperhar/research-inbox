@@ -65,7 +65,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ loading: true });
     try {
       const items = await api.listItems(0, 50, archived, null, null);
-      set({ items, loading: false });
+      set({ items, loading: false, searchQuery: "" });
     } catch {
       set({ loading: false });
     }
@@ -75,7 +75,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ loading: true });
     try {
       const items = await api.searchItems(query, 50);
-      set({ items, loading: false });
+      set({ items, loading: false, searchQuery: query });
     } catch {
       set({ loading: false });
     }

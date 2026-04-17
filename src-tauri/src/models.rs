@@ -13,7 +13,7 @@ pub struct CaptureItem {
     pub is_archived: bool,
     pub created_at: String,
     pub updated_at: String,
-    pub enrichment: Option<String>,
+    pub enrichment: Option<Enrichment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +22,7 @@ pub struct Enrichment {
     pub content_class: String,
     pub entities: Vec<String>,
     pub summary: String,
+    #[serde(default)]
     pub cluster_id: Option<String>,
 }
 
@@ -87,7 +88,7 @@ impl Default for AppSettings {
             default_export_format: "markdown".to_string(),
             max_capture_size_kb: 50,
             launch_at_login: true,
-            theme: "system".to_string(),
+            theme: "dark".to_string(),
             language: "en".to_string(),
             data_location: "~/.research-inbox/".to_string(),
         }

@@ -516,7 +516,38 @@ This doesn't fully fix it — CDHash still changes per compilation. User must re
 
 **Problem:** After `codesign --force --deep`, the icon becomes a blank square. The re-signing process may strip or invalidate the icon resource.
 
-**Status:** Needs fix. The icon is defined in `tauri.conf.json` bundle.icon and set via `TrayIconBuilder::icon(app.default_window_icon())` with `.icon_as_template(true)`.
+**Fix (2026-04-15):**
+- Restored the transparent icon set after an accidental opaque export replaced every PNG/ICNS asset with fully opaque versions.
+- Replaced the old green app icon bundle with the new neon chain source. Canonical source files now live in `src-tauri/icons/app-icon-source.png` (transparent, used for generation) and `src-tauri/icons/app-icon-source-original.png` (raw design drop from the project folder).
+- The generated app icon source is intentionally scaled up versus the original art so the Dock / Finder icon does not look undersized next to first-party macOS apps. Keep the Dock icon visually large; do not "fix" it by shrinking back to the raw design padding.
+- Tray icon no longer reads from `app.default_window_icon()`. It is now wired directly to `src-tauri/icons/tray-icon.png` via `include_image!("./icons/tray-icon.png")`, which avoids template-rendering the large square app icon.
+- `src-tauri/icons/tray-icon.png` and `tray-icon@2x.png` are derived separately from a clean diagonal chain-link glyph (`src-tauri/icons/tray-icon-source.svg`) as monochrome template assets for macOS menu bar rendering. Do not reuse the full app icon as a tray icon.
+- The tray must be created in one place only. `app.trayIcon` in `tauri.conf.json` caused a duplicate menu bar icon once Rust also built a tray manually, so the config-level tray declaration was removed and Rust is now the single source of truth.
+
+**Rule:** if the tray ever shows up as a square again, inspect alpha pixels first. `hasAlpha: yes` is not sufficient — a PNG can still be fully opaque.
+
+## 20.1 Launch Shell / v2 Surface
+
+**Problem:** The v2 tokens existed, but the launch experience still felt like the old flat UI because onboarding and some secondary screens rendered edge-to-edge with minimal panel chrome.
+
+**Fix (2026-04-15):**
+- Added shared `panel-stage` + `panel-shell` wrappers in `src/styles/globals.css` and `src/App.tsx`.
+- Onboarding now launches inside the same framed Well surface as the rest of the app instead of a flat full-window screen.
+- Packs and Settings got card spacing / shell-consistent headers and footers so they no longer regress visually when compared to the inbox.
+- Inbox internals now also follow the v2 retrieval language: the Ask Bar is the primary surface, item cards use quieter metadata + larger breathing room, the bottom nav is a segmented rail, and Topics shares the same spacing/surface system instead of falling back to the old dense feed look.
+- Search state is stored centrally so empty/loading states can distinguish between "no captures yet" and "no search results".
+- Capture overlay success states were also cleaned up: screenshot confirmations now show a human preview instead of raw `[Screenshot: /path]` content, the right-side slot uses an explicit "AI tagging" pill until tags arrive, and the overlay actions/screenshotting state share the same visual language as the rest of the app.
+
+## 20.2 Panel Launch Behavior
+
+**Problem:** Once the inbox UI gained proper spacing and chrome, the old `380x560` tray-sized window started feeling cramped. On installed builds the app could also launch "headless" with only the tray icon visible because the main panel still defaulted to hidden.
+
+**Fix (2026-04-15):**
+- The panel window now boots at `480x720` with sane minimums instead of the old compact tray size. This gives the v2 retrieval layout enough horizontal room for the Ask Bar, hero copy, and bottom rail.
+- `tauri.conf.json` now makes the panel visible and centered on startup. Do not revert this back to hidden unless launch behavior is redesigned end-to-end.
+- Rust startup now explicitly reasserts a regular macOS app activation policy, keeps the Dock icon visible, repositions the panel to a sane default frame, and calls `show_panel()` during setup, on `RunEvent::Ready`, and on macOS `Reopen`.
+- The app is now single-instance via `tauri-plugin-single-instance`; a second launch must wake the existing panel instead of spawning a duplicate tray icon.
+- `src/App.tsx` also re-shows and focuses the panel after the React shell mounts so the initial reveal happens after the WebView is actually alive, not just when Rust thinks the window exists.
 
 ---
 
@@ -652,3 +683,158 @@ Replaced generic dark/light with rich design language:
 AI enrichment uses heuristic rules (keyword classification, entity extraction) and deterministic mock embeddings. When Gemma 4 GGUF + llama.cpp binary are available, only the prompt templates and response parsing change – the pipeline, TTL, sidecar infrastructure are ready.
 
 *Updated: 2026-04-12 — v2 AI Context Engine implementation complete*
+
+---
+
+## 2026-04-14 — v2 rebuild: real sqlite-vec + real Gemma + Well tokens corrected
+
+Previous v2 pass landed schema/components but left three gaps that made the UI look "old" and blocked real AI:
+
+### 1. Design tokens were off from PRD §8.3
+
+Primary Well palette had drifted (`--well-void: #08080D` instead of `#050508`, accent `#7C7FFF` instead of `#6366F1`). Components rendered with the wrong shade, which is why the UI still "looked old" after rebuild.
+
+**Fix:** `src/styles/tokens.css` now matches the plan spec byte-for-byte. Backward-compat aliases (`--bg`, `--text`, `--border`, `--bg-secondary`) are removed; size tokens renamed from `--text-primary-size` to `--text-primary` (the plan's naming). `TagInput.tsx` and `InboxPanel.tsx` were the last holdouts still on old aliases — both migrated.
+
+### 2. sqlite-vec was named but never loaded
+
+`vec_items` was a regular TEXT table storing JSON blobs; `semantic_search` fetched every embedding and did cosine in Rust. Worked for toy data, wouldn't scale and didn't match the PRD.
+
+**Fix:**
+- Added `sqlite-vec = "0.1"` + `rusqlite` `load_extension` feature.
+- `Database::new()` registers `sqlite_vec::sqlite3_vec_init` via `sqlite3_auto_extension` exactly once (`Once::call_once`). Every connection opened after that point has `vec0` available.
+- Legacy non-virtual `vec_items` table is auto-dropped on first migrate (`sql NOT LIKE '%vec0%'` detection) so existing dev DBs upgrade cleanly.
+- New virtual table: `CREATE VIRTUAL TABLE vec_items USING vec0(item_id TEXT PRIMARY KEY, embedding float[384])`.
+- `enrich_item` writes with DELETE+INSERT (vec0 doesn't support UPSERT); `semantic_search` now uses `WHERE embedding MATCH ?1 AND k = ?2 ORDER BY distance`. The embedding is passed as a JSON array string — vec0 parses that natively.
+
+### 3. Model / binary wiring didn't match what's actually on disk
+
+`lib.rs` pointed sidecar at `gemma-4-E2B-it-Q8_0.gguf` (capital E2B); the real file is lowercase `gemma-4-e2b-it-Q8_0.gguf`. The Q4 model the plan originally referenced isn't what got downloaded either — we have the bigger Q8 (~2.8GB).
+
+**Fix:**
+- Model path unified to `~/.research-inbox/models/gemma-4-e2b-it-Q8_0.gguf` throughout (`lib.rs`, `commands.rs` `check_model_status` + `download_model`).
+- Dev setup: symlink from `~/.research-inbox/models/gemma-4-e2b-it-Q8_0.gguf` → `…/Research inbox tool/Gemma/gemma-4-e2b-it-Q8_0.gguf`. No data duplication.
+- `llama-cli` binary + all required dylibs (`libllama`, `libggml*`, `libmtmd`) already in `src-tauri/binaries/`. `sidecar.rs::find_binary()` finds them via `CARGO_MANIFEST_DIR/binaries/llama-cli-aarch64-apple-darwin` in dev and `Contents/Resources/binaries/` in bundle.
+- `download_model` is now a presence-check + synthetic progress emit (the model ships pre-installed in alpha; we're not pulling from HuggingFace at runtime). Dropped `reqwest`/`futures-util`/`sha2`/`tokio` from `Cargo.toml` — cutting ~30 transitive crates and avoiding a long first-compile.
+
+### 4. Dead view + orphan imports cleaned up
+
+`View` type had both `pack-view` and `pack-editor`; nothing set view to `pack-editor` after `setEditingPack` was rewritten to jump straight to `pack-view`. Removed `pack-editor` from the type and the App.tsx branch, and dropped the orphan `PackEditor` import. `PackEditor.tsx` and `SearchBar.tsx` remain on disk as orphans (per CLAUDE.md soft-delete rule — no `git rm`); they're not imported and won't ship.
+
+### Test & build
+
+- `cargo test --lib`: 50/50 pass. New test `test_vec_items_table_exists` confirms vec0 loaded.
+- `cargo check`: clean (5 dead-code warnings for deferred `request()` stdin protocol and unused `cosine_similarity` — both are intentional; kept for future stdin sidecar and offline diagnostics).
+- `npm run build`: tsc + vite both clean.
+
+### What still runs on mocks (known)
+
+- `enrich_with_llm` calls `sidecar.complete()` which spawns `llama-cli` per request. Real — but slow (~150ms cold, ~40ms warm due to mmap).
+- `compute_mock_embedding` is deterministic byte-frequency, 384-dim, normalized. Real embeddings will come when we switch to `llama-cli --embedding` or an embedding-specific model. Semantic search will work identically when that swap happens — only the function body changes.
+- Topic clustering (`get_clusters`) reads `clusters` table but nothing populates it yet; the clustering job is future work (k-means on embeddings, run as a background task after N new captures).
+
+---
+
+## 2026-04-16 — launch / icon / retrieval polish pass
+
+Three separate regressions were making the app feel half-upgraded even after the v2 rebuild:
+
+### 1. Tray icon duplication + fuzzy menu bar rendering
+
+- The duplicate menu bar icon came from two tray creation paths at once: `app.trayIcon` in `tauri.conf.json` and a manual `TrayIconBuilder` in Rust.
+- The config-level tray is now removed; Rust is the single source of truth for tray creation.
+- Current tray asset is **SF Symbol `link`, semibold, scaled up for menu bar legibility** (no longer the tiny 15pt pass), exported to `src-tauri/icons/tray-icon.png` and `tray-icon@2x.png`, then loaded via `include_image!` in `src-tauri/src/lib.rs`.
+- Keep `icon_as_template(true)` enabled. Do not reuse the app icon for the tray.
+
+### 2. App icon safe area was too conservative
+
+- The install / Dock icon source was scaled up again so the artwork sits closer to a native macOS app icon fill instead of reading undersized next to Notes / Telegram in the Dock.
+- `app-icon-source.png` remains the canonical source for the app icon bundle; regenerate `icon.png`, `icon.icns`, `icon.ico`, and the `.iconset` files from that source only.
+
+### 3. Retrieval UI still looked like a cramped legacy feed
+
+- Panel window widened to `520x760`; overlay widened to `468x68`.
+- Retrieval header is now compressed: smaller stat pill, quieter metadata, less duplicated helper copy.
+- `ItemCard` now uses human source labels (`Screen capture` / `Current app` instead of repeated `app`), hides the checkbox until selection mode, and renders screenshot/image items with a right-side thumbnail instead of leaving a dead empty block under the text.
+- Success overlay now has one clear hierarchy: headline, compact source/detail line, AI tagging state, and close control. The old “source pill + giant AI chip + debug-looking detail text” layout is intentionally gone.
+- Capture overlay material was also retuned into a more transparent matte HUD surface: lighter alpha, stronger vibrancy/blur, and a segmented control cluster instead of chunky opaque action pills.
+
+### 4. Screen Recording prompts were sticky because local builds had unstable app identity
+
+- The unsigned local bundle was showing up to `codesign` as a floating ad-hoc identity like `app-48816…` instead of the stable bundle id `com.omniboard.research-inbox`.
+- That mismatch is exactly the kind of thing that confuses TCC: macOS can show `Research Inbox` as enabled in Screen Recording, then still prompt again because the freshly rebuilt app is effectively a different identity.
+- Local fix: re-sign the built app bundle and the installed `/Applications/Research Inbox.app` with an explicit ad-hoc identifier:
+  `codesign --force --deep --sign - --identifier com.omniboard.research-inbox ".../Research Inbox.app"`
+- After signing, `codesign -dv` should report `Identifier=com.omniboard.research-inbox`, not `app-<hash>`.
+- If Screen Recording keeps prompting after another rebuild, the likely regression is that the new bundle was copied over without this explicit re-sign step.
+
+---
+
+## v2.5 Redesign Pass — 2026-04-16
+
+Companion spec: `../designing v2.5.md`. This pass is a full sweep over tray / overlay / inbox / material / motion. Every line of the spec was mapped to concrete code or asset changes — no items tagged "out of scope".
+
+### Principles applied (spec §3)
+
+- **One surface, one moment.** Tray = locate/summon, overlay = confirm/orient, inbox = retrieve/assemble. Each surface now obeys its own law instead of trying to be tool + brand + hero at once.
+- **Matte first, glow second.** Accent-muted alpha dropped from `0.12 → 0.08`, glow budget from `0.18 → 0.1`, and violet wash gradients in `panel-stage` / `panel-shell::before` / `overlay-glass::before` halved. `--well-glow` alpha `0.08 → 0.04`.
+- **Utility beats ornament in tiny surfaces.** Tray glyph redesigned; old Sheen gradients on the inbox retrieval card removed; stream cards flattened to evidence strips.
+- **Retrieval beats marketing.** Hero slogan removed from the inbox. First viewport is Ask Bar + content.
+
+### 1. Icon system split (§4.1)
+
+- **Tray icon** is now a dedicated monochrome template glyph drawn on the 44pt optical grid (`22px` @1x, `44px` @2x). SVG source lives in `src-tauri/icons/tray-icon-source.svg`; PNG rasters are generated via Pillow (`python3` + LANCZOS downsample from a 4× supersample). Shape is a two-half-ring bridge — reads unambiguously as "link/connection" rather than the previous two-parallel-pill "paperclip accident".
+- **App/Dock icon** regenerated from scratch (`app-icon-source.png`) as a filled chain-link pair with indigo gradient, inner glass highlight, and a dark smoked substrate — expressive but not neon. Rasterised by Pillow; all target sizes and `icon.icns` compiled via `cargo tauri icon src-tauri/icons/app-icon-source.png`. Tray glyph and Dock glyph are intentionally distinct: tray is an outlined bridge, Dock is a solid gradient chain.
+
+### 2. Overlay rebuild (§4.2)
+
+- **State machine** is now explicit: `idle | interactive | screenshotting | success | error`. The `error` branch carries a typed `kind` of `permission | failed | empty`.
+- **Interactive state** is a compact 3-zone row: `[icon] [one-line instruction] [matte segmented Text|Screen unit]` + quiet close. The previous two separate action buttons are now a single matte segmented control with a 1px divider — one matte unit, not "two neighboring buttons".
+- **Success state** maps onto the PRD 3-line shape: line 1 = confirmation + source + tags (AI tags fade in asynchronously; the `Tagging` ghost chip keeps the line complete when tags haven't arrived yet), line 2 = preview/detail, line 3 = the shrinking timer bar. Screenshot success carries the camera indicator so "proof" reads first.
+- **Blocked / error state** is new. Rust preflights `CGPreflightScreenCaptureAccess()` before spawning `screencapture`. If access is denied, `capture_screenshot` emits a `capture-error` event with `kind: "permission"` and returns `Err("permission_denied")`. If the file doesn't exist post-run we treat that as user cancellation (`Err("cancelled")`) and fall back to interactive, not error. Any other non-zero exit emits `kind: "failed"`. Empty captures (no clipboard text, no image, no selection) surface as `kind: "empty"`. Each kind has a distinct icon (triangle-alert for warn tones, dashed circle for empty), distinct tone (warning amber border + wash on `.overlay-glass[data-state="error"]`), a concrete body ("what failed, why, what to do next") and a singular CTA: `Open Settings` for permission, `Try again` for failed, quiet close for empty.
+- **Drag everywhere.** `OverlayShell` unconditionally carries `data-tauri-drag-region`, so interactive, success, screenshotting, and error are all draggable. Interactive controls use a `noDrag` prop (`stopPropagation` on `mousedown` + `pointerdown`) so buttons still click cleanly without starting a drag. A thin centered drag grip sits at the top of every state as the visible-but-quiet affordance.
+- **Mobility persistence.** See §4 below.
+
+### 3. Inbox simplification (§4.3)
+
+- **Shell.** Hero slogan (`Find the signal, not the mess.`) and long explainer paragraph were removed. Top chrome compressed from `28px` to `26px`; the second header block is now a single quiet metadata line (`12 captures · 4 sources · 3 today`), then the Ask Bar. Content starts earlier.
+- **Ask Bar.** Mode signals reduced from eight competing elements to three: dominant mode icon (clickable/cycles), placeholder, segmented pill row. Eyebrow `MODE` label, separate helper text line, "Tab cycles" footnote, and the big duplicated hint paragraph are gone. Suggested-mode pill survives but is moved into the segmented row and only appears when it differs from the active mode.
+- **Stream cards → evidence strips.** `ItemCard` uses the new `.evidence-strip` utility: flat `--surface-card` background, `14px` radius, tighter padding (`8px / 10px` vs previous `14px / 16px`). Source avatar `32×32 → 28×28`. AI-note chip moved from the collapsed view into the expanded view (1–2 line preview default). Right-side thumbnail sized down to `72×54`. Checkbox only renders when selection mode is active.
+- **Bottom nav** is now an infrastructural strip: ghost-background tabs, no per-tab subtext, a small settings gear, no redundant "N today" pill (today count lives in the inbox metadata line). Top-of-content feels like the main event.
+
+### 4. Position persistence + mobility (§4.2 + §4.3)
+
+- Positions stored in `~/.research-inbox/window-positions.json`, keyed by window label (`overlay`, `panel`). New Rust commands: `save_window_position`, `load_window_position`, `reset_window_position`. Overlay and panel frontends call `save_window_position` on every `onMoved` (debounced 220ms for the panel to avoid thrash).
+- **Restore on show.** `do_capture_flow` and `show_panel` both call `commands::lookup_window_position(label)` before making the window visible. If the saved coords still fit on the primary monitor (≥0 and `x+w ≤ screen_w`, `y+h ≤ screen_h`), we use them; otherwise we fall back to the default top-center / tray-anchored position. The previous `ns_window.center()` call in `show_panel` was removed because it overrode the persisted position after `set_position()` was already applied.
+- **Reset.** Tray menu now has `Recenter Overlay` and `Snap Inbox to Tray Anchor` items; both call `reset_window_position(label)`, which deletes the saved entry and immediately re-applies the default anchor.
+- **Drag affordance** is a shared `.drag-grip` pill (28×3, subtle hover lift) used by the overlay top-center and the panel top chrome. Quiet but visible.
+
+### 5. Material / motion retune (§4.4)
+
+- Dark-theme tokens darkened (`--well-void 050508 → 040406`, surface card/input shaved similarly) and borders tightened (`--border-default 0.07 → 0.06`, `--border-subtle 0.04 → 0.035`).
+- Added `--signal-warning` for the new blocked state.
+- `.overlay-glass` blur `34px → 36px`, saturate `185% → 160%` — closer to Sequoia HUD material, further from neon concept mockup. `inset` top-highlight alpha halved.
+- New utilities: `.drag-grip`, `.evidence-strip`, `.overlay-glass[data-state="error"]`.
+- Motion: `panelReveal` stripped of scale flourish (just opacity + 3px translate). `itemStagger` / `newItemSlide` / `tagFadeIn` kept but each travel distance trimmed by 1–2px. Unused `accentPulse` keyframe removed.
+
+### 6. New Rust surface
+
+| Command | Purpose |
+|---|---|
+| `open_screen_capture_settings` | CTA target for the overlay's permission-denied state. Opens `Privacy_ScreenCapture`. |
+| `check_screen_capture_permission` | Frontend-callable wrapper around `CGPreflightScreenCaptureAccess()`. |
+| `save_window_position(label,x,y)` | Persists logical position to `window-positions.json`. |
+| `load_window_position(label)` | Returns `Option<(x,y)>` — used sparingly; Rust prefers the internal `lookup_window_position` helper. |
+| `reset_window_position(label)` | Wipes saved entry and snaps window back to default. Tray-wired. |
+
+All new commands registered in `lib.rs::invoke_handler`. `capture_screenshot` now takes `app_handle: tauri::AppHandle` so it can emit `capture-error` out-of-band when access is blocked.
+
+### 7. Verification
+
+- `npm run build` → `tsc --noEmit` clean, Vite production bundle builds (main `66 kB` / overlay `14 kB` gzipped).
+- `cargo check` → clean, only the five pre-existing warnings about unused AI-sidecar helpers.
+- `cargo test` → 50 passing, 0 failed (unchanged; no tests removed or disabled during the pass).
+
+### 8. What's intentionally not in this pass
+
+Nothing — every bullet in `designing v2.5.md` §4 is touched. If a later reviewer disagrees with a specific rendering decision (segmented control spacing, warning hue, metadata line copy, card density), the review fix belongs in a follow-up section below this one, not a rewrite of this log.

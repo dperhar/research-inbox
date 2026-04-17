@@ -59,7 +59,7 @@ export default function TagInput({ value, onChange }: TagInputProps) {
 
   return (
     <div className="relative">
-      <div className="flex flex-wrap gap-1 items-center p-1.5 border border-[var(--border)] rounded-md bg-[var(--bg)] min-h-[32px]">
+      <div className="flex flex-wrap gap-1 items-center p-1.5 border border-[var(--border-default)] rounded-md bg-[var(--surface-input)] min-h-[32px]">
         {value.map((tag) => (
           <span
             key={tag}
@@ -84,16 +84,16 @@ export default function TagInput({ value, onChange }: TagInputProps) {
           onFocus={() => input && setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
           placeholder={value.length === 0 ? t("add_tag") : ""}
-          className="flex-1 min-w-[60px] bg-transparent outline-none text-xs text-[var(--text)]"
+          className="flex-1 min-w-[60px] bg-transparent outline-none text-xs text-[var(--text-1)]"
         />
       </div>
       {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--bg)] border border-[var(--border)] rounded-md shadow-lg z-10 max-h-[120px] overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface-elevated)] border border-[var(--border-default)] rounded-md shadow-lg z-10 max-h-[120px] overflow-y-auto" style={{ boxShadow: "var(--shadow-elevated)" }}>
           {suggestions.map((s) => (
             <button
               key={s.name}
               onMouseDown={(e) => { e.preventDefault(); addTag(s.name); }}
-              className="w-full text-left px-2 py-1 text-xs hover:bg-[var(--bg-secondary)] flex items-center gap-1"
+              className="w-full text-left px-2 py-1 text-xs hover:bg-[var(--surface-card-hover)] flex items-center gap-1"
             >
               <span
                 style={{

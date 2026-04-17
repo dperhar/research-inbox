@@ -137,8 +137,8 @@ export default function PackView() {
       <div
         className="flex items-center gap-2 px-3 py-2 border-b flex-shrink-0"
         style={{
-          background: "var(--well-wall)",
-          borderColor: "var(--border-default)",
+          background: "rgba(15, 15, 20, 0.72)",
+          borderColor: "var(--border-subtle)",
         }}
         data-tauri-drag-region
       >

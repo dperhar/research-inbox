@@ -13,15 +13,13 @@ pub struct GeneratedPack {
 
 /// Generate a pack from natural language intent.
 /// Uses keyword matching + recency. Will be replaced by LLM.
-pub fn generate_pack_from_intent(
-    db: &Database,
-    intent: &str,
-) -> Result<GeneratedPack, String> {
+pub fn generate_pack_from_intent(db: &Database, intent: &str) -> Result<GeneratedPack, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let lower = intent.to_lowercase();
 
     // Find items matching intent keywords via FTS
-    let search_term = intent.split_whitespace()
+    let search_term = intent
+        .split_whitespace()
         .filter(|w| w.len() > 3)
         .collect::<Vec<_>>()
         .join(" OR ");
@@ -42,11 +40,13 @@ pub fn generate_pack_from_intent(
     };
 
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-    let items: Vec<(String, String)> = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+    let items: Vec<(String, String)> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     if items.is_empty() {
         return Err("No matching captures found for this intent.".to_string());
@@ -61,19 +61,22 @@ pub fn generate_pack_from_intent(
         "technical"
     } else {
         "general"
-    }.to_string();
+    }
+    .to_string();
 
     let tone = if lower.contains("formal") || audience == "executive" {
         "formal"
     } else {
         "casual"
-    }.to_string();
+    }
+    .to_string();
 
     // Generate title from intent
     let title = intent.chars().take(50).collect::<String>();
 
     // Summary from first few items
-    let summary = items.iter()
+    let summary = items
+        .iter()
         .take(3)
         .map(|(_, content)| content.chars().take(60).collect::<String>())
         .collect::<Vec<_>>()
@@ -81,7 +84,11 @@ pub fn generate_pack_from_intent(
 
     Ok(GeneratedPack {
         title,
-        summary: if summary.len() > 200 { format!("{}...", &summary[..200]) } else { summary },
+        summary: if summary.len() > 200 {
+            format!("{}...", &summary[..200])
+        } else {
+            summary
+        },
         item_ids,
         audience,
         tone,
@@ -105,7 +112,8 @@ pub fn chat_modify_pack(
 
     // Handle "remove" instructions
     if lower.contains("remove") || lower.contains("убери") || lower.contains("удали") {
-        let keyword = instruction.split_whitespace()
+        let keyword = instruction
+            .split_whitespace()
             .find(|w| w.len() > 4 && !["remove", "убери", "удали", "about", "section"].contains(w))
             .unwrap_or("");
 
@@ -114,15 +122,20 @@ pub fn chat_modify_pack(
             let before_count = new_item_ids.len();
 
             new_item_ids.retain(|id| {
-                let content: String = conn.query_row(
-                    "SELECT content FROM items WHERE id = ?1", [id], |row| row.get(0)
-                ).unwrap_or_default();
+                let content: String = conn
+                    .query_row("SELECT content FROM items WHERE id = ?1", [id], |row| {
+                        row.get(0)
+                    })
+                    .unwrap_or_default();
                 !content.to_lowercase().contains(&keyword.to_lowercase())
             });
 
             let removed = before_count - new_item_ids.len();
             if removed > 0 {
-                diff_parts.push(format!("Removed {} item(s) matching '{}'", removed, keyword));
+                diff_parts.push(format!(
+                    "Removed {} item(s) matching '{}'",
+                    removed, keyword
+                ));
             }
         }
     }

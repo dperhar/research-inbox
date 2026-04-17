@@ -82,7 +82,7 @@ export interface AppInfo {
   url_from_title?: string;
 }
 
-export type View = "inbox" | "packs" | "topics" | "settings" | "pack-view" | "pack-editor";
+export type View = "inbox" | "packs" | "topics" | "settings" | "pack-view";
 
 export const TAG_COLORS = [
   { bg: "var(--tag-blue-bg)", text: "var(--tag-blue-text)" },

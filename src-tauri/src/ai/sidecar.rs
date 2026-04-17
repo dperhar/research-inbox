@@ -1,6 +1,6 @@
 use std::io::Write;
-use std::path::PathBuf;
-use std::process::Child;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -57,6 +57,18 @@ impl SidecarManager {
         self.state.lock().unwrap().clone()
     }
 
+    pub fn refresh_model_state(&self) {
+        let next = if self.model_path.exists() {
+            SidecarState::Sleeping
+        } else {
+            SidecarState::NotReady
+        };
+        let mut state = self.state.lock().unwrap();
+        if *state != SidecarState::Ready {
+            *state = next;
+        }
+    }
+
     pub fn ttl_expired(&self) -> bool {
         self.ttl.is_expired()
     }
@@ -67,6 +79,7 @@ impl SidecarManager {
     /// - Waking    → no-op (already in progress)
     /// - Ready     → no-op
     pub fn ensure_ready(&self) -> Result<(), String> {
+        self.refresh_model_state();
         let current = self.state.lock().unwrap().clone();
         match current {
             SidecarState::NotReady => {
@@ -77,19 +90,20 @@ impl SidecarManager {
                 log("ensure_ready: sleeping → waking");
                 *self.state.lock().unwrap() = SidecarState::Waking;
 
-                // Placeholder spawn: verify model file still exists, then
-                // transition to Ready. Real llama.cpp Command::new() wiring
-                // happens when we have the binary.
                 if !self.model_path.exists() {
                     *self.state.lock().unwrap() = SidecarState::NotReady;
                     log("ensure_ready: model disappeared during spawn");
                     return Err("Model file not found during spawn.".to_string());
                 }
 
-                // Simulated ready – no actual Child process yet.
+                if self.find_runtime_paths().is_err() {
+                    *self.state.lock().unwrap() = SidecarState::Sleeping;
+                    return Err("llama runtime not available".to_string());
+                }
+
                 *self.state.lock().unwrap() = SidecarState::Ready;
                 self.ttl.reset();
-                log("ensure_ready: state → Ready (simulated)");
+                log("ensure_ready: state → Ready");
                 Ok(())
             }
             SidecarState::Waking => {
@@ -140,32 +154,42 @@ impl SidecarManager {
     /// Run inference synchronously: spawn llama-cli with -p prompt, capture stdout.
     /// The binary is called fresh each time; macOS mmap keeps the model warm
     /// after the first load (~150ms cold, ~40ms subsequent).
-    pub fn complete(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
+    pub fn complete(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<String, String> {
+        self.refresh_model_state();
         if !self.model_path.exists() {
             return Err("Model not found".to_string());
         }
 
         self.ttl.reset();
 
-        let binary = self.find_binary()?;
-        log(&format!("complete: binary={}", binary));
+        let (binary, libs_source_dir) = self.find_runtime_paths()?;
+        let runtime_lib_dir = self.prepare_runtime_lib_dir(&libs_source_dir)?;
+        self.clear_quarantine(Path::new(&binary));
+        log(&format!(
+            "complete: binary={} libs={}",
+            binary, runtime_lib_dir
+        ));
 
-        // Point DYLD_LIBRARY_PATH at the same dir as the binary so the
-        // bundled dylibs are found at runtime.
-        let binary_dir = std::path::Path::new(&binary)
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_string_lossy()
-            .to_string();
-
-        let output = std::process::Command::new(&binary)
-            .arg("-m").arg(&self.model_path)
+        let output = Command::new(&binary)
+            .arg("-m")
+            .arg(&self.model_path)
+            .arg("-no-cnv")
+            .arg("--single-turn")
             .arg("--no-display-prompt")
-            .arg("-p").arg(prompt)
-            .arg("-n").arg(max_tokens.to_string())
-            .arg("--temp").arg(temperature.to_string())
+            .arg("-p")
+            .arg(prompt)
+            .arg("-n")
+            .arg(max_tokens.to_string())
+            .arg("--temp")
+            .arg(temperature.to_string())
             .arg("--log-disable")
-            .env("DYLD_LIBRARY_PATH", &binary_dir)
+            .env("DYLD_LIBRARY_PATH", &runtime_lib_dir)
+            .env("DYLD_FALLBACK_LIBRARY_PATH", &runtime_lib_dir)
             .stderr(std::process::Stdio::null())
             .output()
             .map_err(|e| format!("Failed to run llama-cli: {}", e))?;
@@ -181,34 +205,103 @@ impl SidecarManager {
         Ok(result)
     }
 
-    /// Locate the llama-cli binary. Checks bundled app path first, then dev
-    /// path relative to CARGO_MANIFEST_DIR.
-    fn find_binary(&self) -> Result<String, String> {
-        // Bundled app: <Contents>/MacOS/../Resources/binaries/llama-cli-aarch64-apple-darwin
+    fn find_runtime_paths(&self) -> Result<(String, PathBuf), String> {
         let exe = std::env::current_exe().unwrap_or_default();
         let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
-        let bundle_path = exe_dir
+        let bundle_resources = exe_dir
             .parent()
             .unwrap_or(exe_dir)
             .join("Resources")
-            .join("binaries")
-            .join("llama-cli-aarch64-apple-darwin");
-        if bundle_path.exists() {
-            log(&format!("find_binary: bundle path {:?}", bundle_path));
-            return Ok(bundle_path.to_string_lossy().to_string());
+            .join("binaries");
+        let bundle_binary = bundle_resources.join("llama-cli-aarch64-apple-darwin");
+        if bundle_binary.exists() {
+            log(&format!(
+                "find_runtime_paths: bundle binary {:?}",
+                bundle_binary
+            ));
+            return Ok((
+                bundle_binary.to_string_lossy().to_string(),
+                bundle_resources,
+            ));
         }
 
-        // Dev mode: src-tauri/binaries/llama-cli-aarch64-apple-darwin
-        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("binaries")
-            .join("llama-cli-aarch64-apple-darwin");
-        if dev_path.exists() {
-            log(&format!("find_binary: dev path {:?}", dev_path));
-            return Ok(dev_path.to_string_lossy().to_string());
+        let macos_binary = exe_dir.join("llama-cli");
+        if macos_binary.exists() && bundle_resources.exists() {
+            log(&format!(
+                "find_runtime_paths: MacOS binary {:?} with resources {:?}",
+                macos_binary, bundle_resources
+            ));
+            return Ok((macos_binary.to_string_lossy().to_string(), bundle_resources));
         }
 
-        log("find_binary: not found in bundle or dev paths");
+        let dev_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        let dev_binary = dev_dir.join("llama-cli-aarch64-apple-darwin");
+        if dev_binary.exists() {
+            log(&format!("find_runtime_paths: dev path {:?}", dev_binary));
+            return Ok((dev_binary.to_string_lossy().to_string(), dev_dir));
+        }
+
+        log("find_runtime_paths: not found in bundle or dev paths");
         Err("llama-cli binary not found".to_string())
+    }
+
+    fn prepare_runtime_lib_dir(&self, source_dir: &Path) -> Result<String, String> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let runtime_dir = PathBuf::from(home)
+            .join(".research-inbox")
+            .join("runtime")
+            .join("llama-dylibs");
+        std::fs::create_dir_all(&runtime_dir).map_err(|e| e.to_string())?;
+
+        let mapping = [
+            ("libmtmd.0.0.8763.dylib", "libmtmd.0.dylib"),
+            ("libllama.0.0.8763.dylib", "libllama.0.dylib"),
+            ("libggml.0.9.11.dylib", "libggml.0.dylib"),
+            ("libggml-cpu.0.9.11.dylib", "libggml-cpu.0.dylib"),
+            ("libggml-blas.0.9.11.dylib", "libggml-blas.0.dylib"),
+            ("libggml-metal.0.9.11.dylib", "libggml-metal.0.dylib"),
+            ("libggml-rpc.0.9.11.dylib", "libggml-rpc.0.dylib"),
+            ("libggml-base.0.9.11.dylib", "libggml-base.0.dylib"),
+        ];
+
+        for (source_name, target_name) in mapping {
+            let source = source_dir.join(source_name);
+            let target = runtime_dir.join(target_name);
+            if !source.exists() {
+                return Err(format!("Runtime library missing: {}", source.display()));
+            }
+            self.copy_if_needed(&source, &target)?;
+            self.clear_quarantine(&target);
+        }
+
+        Ok(runtime_dir.to_string_lossy().to_string())
+    }
+
+    fn copy_if_needed(&self, source: &Path, target: &Path) -> Result<(), String> {
+        let should_copy = match (std::fs::metadata(source), std::fs::metadata(target)) {
+            (Ok(src), Ok(dst)) => src.len() != dst.len(),
+            (Ok(_), Err(_)) => true,
+            (Err(e), _) => return Err(e.to_string()),
+        };
+
+        if should_copy {
+            std::fs::copy(source, target).map_err(|e| {
+                format!(
+                    "Failed to stage runtime library {} -> {}: {}",
+                    source.display(),
+                    target.display(),
+                    e
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn clear_quarantine(&self, path: &Path) {
+        let _ = Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine"])
+            .arg(path)
+            .output();
     }
 }
 
